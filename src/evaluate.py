@@ -64,8 +64,6 @@ def plot_predictions(
     save_path: str = None
 ) -> plt.Figure:
     """Scatter plot of actual vs predicted positions."""
-        matplotlib Figure object.
-    """
     logger.info("Creating prediction plot...")
     
     fig, ax = plt.subplots(figsize=(10, 8))

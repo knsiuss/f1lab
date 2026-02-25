@@ -8,32 +8,77 @@ Feature engineering for race prediction models.
 :license: MIT
 """
 
+import json
 import logging
 import os
 import pickle
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 
+try:
+    from src.preseason_testing import merge_preseason_features
+except ImportError:  # pragma: no cover - fallback when running from src/
+    try:
+        from preseason_testing import merge_preseason_features
+    except ImportError:  # pragma: no cover - optional module unavailable
+        merge_preseason_features = None
+
 logger = logging.getLogger(__name__)
+
+
+def _feature_schema_path(model_dir: str) -> str:
+    return os.path.join(model_dir, "feature_columns.json")
+
+
+def _save_feature_schema(model_dir: str, feature_columns: List[str]) -> None:
+    try:
+        with open(_feature_schema_path(model_dir), "w", encoding="utf-8") as f:
+            json.dump(feature_columns, f)
+    except Exception as e:  # pragma: no cover - non-critical persistence
+        logger.warning("Could not save feature schema: %s", e)
+
+
+def _load_feature_schema(model_dir: str) -> Optional[List[str]]:
+    path = _feature_schema_path(model_dir)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list) and all(isinstance(x, str) for x in data):
+            return data
+    except Exception as e:  # pragma: no cover - non-critical persistence
+        logger.warning("Could not load feature schema: %s", e)
+    return None
 
 
 def prepare_features(
     df: pd.DataFrame, 
-    train_mode: bool = True
+    train_mode: bool = True,
+    include_preseason_features: bool = False,
+    preseason_csv_path: Optional[str] = None,
+    persist_artifacts: bool = True,
 ) -> Tuple[pd.DataFrame, Optional[pd.Series], Dict[str, LabelEncoder]]:
     """Transform race data into encoded feature matrix for model input."""
-    logger.info(f"Preparing features (train_mode={train_mode})...")
+    logger.info(
+        "Preparing features (train_mode=%s, include_preseason_features=%s, persist_artifacts=%s)...",
+        train_mode,
+        include_preseason_features,
+        persist_artifacts,
+    )
     
     try:
         # Core feature/target definitions used throughout the function
-        features = ['Starting Grid', 'Driver', 'Team', 'Track']
+        base_features = ['Starting Grid', 'Driver', 'Team', 'Track']
+        features = list(base_features)
         target = 'Position'
+        model_dir = 'models'
         
-        def _empty_result() -> Tuple[pd.DataFrame, Optional[pd.Series], Dict[str, LabelEncoder]]:
+        def _empty_result(feature_columns: Optional[List[str]] = None) -> Tuple[pd.DataFrame, Optional[pd.Series], Dict[str, LabelEncoder]]:
             """Return consistent empty outputs when no usable data is present."""
-            X_empty = pd.DataFrame(columns=features)
+            X_empty = pd.DataFrame(columns=feature_columns or features)
             y_empty = pd.Series(name=target, dtype='float64') if train_mode else None
             return X_empty, y_empty, {}
         
@@ -41,6 +86,25 @@ def prepare_features(
         if df is None or df.empty:
             logger.warning("Received empty DataFrame; returning empty features without error")
             return _empty_result()
+
+        # Ensure models directory exists early (schema alignment depends on it)
+        if not os.path.exists(model_dir):
+            os.makedirs(model_dir)
+            logger.info(f"Created directory: {model_dir}")
+
+        stored_schema = None if train_mode else _load_feature_schema(model_dir)
+        schema_requires_preseason = bool(
+            stored_schema and any(str(col).startswith("preseason_") for col in stored_schema)
+        )
+
+        # Optional 2026 pre-season testing enrichment (team-level local CSV; performance-safe)
+        if (include_preseason_features or schema_requires_preseason) and merge_preseason_features is not None:
+            try:
+                df = merge_preseason_features(df, file_path=preseason_csv_path)
+            except Exception as e:
+                logger.warning("Pre-season feature merge failed; continuing with core features only: %s", e)
+        elif (include_preseason_features or schema_requires_preseason) and merge_preseason_features is None:
+            logger.warning("Pre-season feature merge helper unavailable; continuing with core features only")
         
         # Filter to finished races in training mode
         if train_mode:
@@ -52,29 +116,57 @@ def prepare_features(
             if df.empty:
                 logger.warning("No finished races found; returning empty features")
                 return _empty_result()
+
+        # Build expanded feature list after optional enrichment
+        if include_preseason_features or schema_requires_preseason:
+            preseason_cols = sorted(
+                c for c in df.columns
+                if isinstance(c, str) and c.startswith("preseason_")
+            )
+            # Keep only numeric (or coercible numeric) engineered columns
+            numeric_preseason_cols: List[str] = []
+            for col in preseason_cols:
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    numeric_preseason_cols.append(col)
+                    continue
+                if pd.to_numeric(df[col], errors="coerce").notna().any():
+                    numeric_preseason_cols.append(col)
+            features = base_features + [c for c in numeric_preseason_cols if c not in base_features]
+
+        # In inference mode, honor the exact feature schema used at training time
+        if not train_mode and stored_schema:
+            features = list(stored_schema)
         
         # Validate required columns exist
         missing_features = [f for f in features if f not in df.columns]
         if missing_features:
-            logger.error(f"Missing feature columns: {missing_features}")
-            raise ValueError(f"Missing columns: {missing_features}")
+            missing_core = [f for f in missing_features if f in base_features]
+            if missing_core:
+                logger.error(f"Missing feature columns: {missing_core}")
+                raise ValueError(f"Missing columns: {missing_core}")
         
         if train_mode and target not in df.columns:
             logger.error(f"Target column '{target}' not found")
             raise ValueError(f"Missing target column: {target}")
-        
+
+        # Add absent engineered columns for inference compatibility
+        for col in missing_features:
+            if col not in df.columns:
+                df[col] = 0
+
         X = df[features].copy()
         y = df[target] if train_mode and target in df.columns else None
-        
-        # Ensure models directory exists
-        model_dir = 'models'
-        if not os.path.exists(model_dir):
-            os.makedirs(model_dir)
-            logger.info(f"Created directory: {model_dir}")
+
+        # Normalize numeric columns (including optional pre-season features)
+        numeric_cols = [c for c in X.columns if c not in ['Driver', 'Team', 'Track']]
+        for col in numeric_cols:
+            X[col] = pd.to_numeric(X[col], errors='coerce')
+        if numeric_cols:
+            X[numeric_cols] = X[numeric_cols].fillna(0)
         
         # Encode categorical columns
         encoders: Dict[str, LabelEncoder] = {}
-        categorical_cols = ['Driver', 'Team', 'Track']
+        categorical_cols = [c for c in ['Driver', 'Team', 'Track'] if c in X.columns]
         
         for col in categorical_cols:
             le = LabelEncoder()
@@ -84,8 +176,9 @@ def prepare_features(
                 # Fit encoder and save
                 try:
                     X[col] = le.fit_transform(X[col])
-                    with open(encoder_path, 'wb') as f:
-                        pickle.dump(le, f)
+                    if persist_artifacts:
+                        with open(encoder_path, 'wb') as f:
+                            pickle.dump(le, f)
                     encoders[col] = le
                     logger.debug(f"Fitted and saved encoder for {col} ({len(le.classes_)} classes)")
                 except Exception as e:
@@ -114,6 +207,9 @@ def prepare_features(
                 except Exception as e:
                     logger.error(f"Error loading encoder for {col}: {e}")
                     raise
+
+        if train_mode and persist_artifacts:
+            _save_feature_schema(model_dir, X.columns.tolist())
         
         logger.info(f"Features prepared: {X.shape[0]} samples, {X.shape[1]} features")
         if y is not None:

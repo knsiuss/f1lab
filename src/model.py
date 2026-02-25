@@ -13,6 +13,7 @@ import os
 import pickle
 from typing import Optional, Tuple
 
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.model_selection import train_test_split
@@ -31,16 +32,29 @@ RANDOM_STATE = 42
 
 
 def train_model(
-    df: pd.DataFrame
+    df: pd.DataFrame,
+    enable_preseason_features: bool = True,
+    preseason_csv_path: Optional[str] = None,
+    persist: bool = True,
 ) -> Tuple[HistGradientBoostingRegressor, pd.DataFrame, pd.Series]:
     """Train position prediction model on race data."""
     logger.info("Starting model training...")
     
     # Prepare features
     logger.info("Preparing features...")
-    X, y, _ = prepare_features(df, train_mode=True)
+    X, y, _ = prepare_features(
+        df,
+        train_mode=True,
+        include_preseason_features=enable_preseason_features,
+        preseason_csv_path=preseason_csv_path,
+        persist_artifacts=persist,
+    )
+    if X is None or X.empty or y is None or y.empty:
+        raise ValueError("Training data produced empty feature matrix/target")
     
     # Split data
+    if len(X) < 3:
+        raise ValueError("Need at least 3 samples to train/test split a model")
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, 
         test_size=TEST_SIZE, 
@@ -58,17 +72,36 @@ def train_model(
         early_stopping=True
     )
     model.fit(X_train, y_train)
+    # Persist feature names for UI/debug display.
+    try:
+        setattr(model, "feature_names_in_", np.array(X.columns.tolist(), dtype=object))
+    except Exception:
+        pass
+    # HistGradientBoostingRegressor may not expose feature_importances_ depending on sklearn version.
+    if not hasattr(model, "feature_importances_"):
+        fallback_importance = np.ones(X.shape[1], dtype=float)
+        if fallback_importance.sum() > 0:
+            fallback_importance = fallback_importance / fallback_importance.sum()
+        try:
+            setattr(model, "feature_importances_", fallback_importance)
+        except Exception:
+            pass
     
     # Save model
-    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-    with open(MODEL_PATH, 'wb') as f:
-        pickle.dump(model, f)
-    logger.info(f"Model saved to {MODEL_PATH}")
+    if persist:
+        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+        with open(MODEL_PATH, 'wb') as f:
+            pickle.dump(model, f)
+        logger.info(f"Model saved to {MODEL_PATH}")
     
     # Log feature importances
     feature_names = X.columns.tolist()
-    importances = dict(zip(feature_names, model.feature_importances_))
-    logger.info(f"Feature importances: {importances}")
+    importances_raw = getattr(model, "feature_importances_", None)
+    if importances_raw is not None and len(importances_raw) == len(feature_names):
+        importances = dict(zip(feature_names, importances_raw))
+        logger.info(f"Feature importances: {importances}")
+    else:
+        logger.info("Feature importances unavailable for this model/sklearn version")
     
     return model, X_test, y_test
 

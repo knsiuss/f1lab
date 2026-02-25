@@ -17,9 +17,11 @@ from plotly.subplots import make_subplots
 import fastf1
 from datetime import datetime, timedelta
 import logging
+import json
 from pathlib import Path
 import joblib
 import warnings
+import time
 
 warnings.filterwarnings('ignore')
 
@@ -51,8 +53,21 @@ from fastf1_plotting import (
 from advanced_viz import plot_telemetry_comparison, plot_track_3d, plot_gear_shift_trace, plot_corner_performance, plot_tyre_shape, plot_circuit_context
 from qualifying_viz import plot_qualifying_evolution, plot_qualifying_gap, plot_sector_dominance
 from home import render_home_tab
+from f1_2026_updates import (
+    render_f1_2026_updates_tab,
+    OFFICIAL_2026_CALENDAR,
+    SPRINT_2026,
+    PRESEASON_TESTS_2026,
+    OFFICIAL_2026_UPDATES,
+    load_2026_api_snapshot,
+    load_2026_news_snapshot,
+)
 from race_replay_data import get_race_replay_frames, get_circuit_rotation, format_race_time
 from race_replay_viz import create_replay_animation, create_static_replay_frame, create_leaderboard_table, create_telemetry_gauges
+try:
+    from preseason_testing import load_preseason_testing_team_features, normalize_team_name
+except ImportError:
+    from src.preseason_testing import load_preseason_testing_team_features, normalize_team_name
 import matplotlib.pyplot as plt
 
 # Page config
@@ -215,46 +230,696 @@ def show_plotly_chart(fig, use_container_width=True, **kwargs):
                                    'autoScale2d', 'resetScale2d', 'toImage'],
         'staticPlot': False       # Keep it interactive
     }
+    # Streamlit can generate duplicate auto-IDs when identical charts are rendered in multiple tabs.
+    # Assign a unique key unless the caller already provided one.
+    if "key" not in kwargs:
+        plot_counter = int(st.session_state.get("_plotly_auto_key_counter", 0)) + 1
+        st.session_state["_plotly_auto_key_counter"] = plot_counter
+        kwargs["key"] = f"plotly_auto_{plot_counter}"
     st.plotly_chart(fig, use_container_width=use_container_width, config=config, **kwargs)
 
 
-@st.cache_data(ttl=3600)
-def load_race_data():
-    """Load and cache race data with combined race + sprint points."""
+def maybe_run_countdown_autorefresh() -> None:
+    """Global 1s rerun for live countdown panels."""
+    # Small sleep at end-of-render to keep countdowns ticking without aggressive CPU usage.
+    time.sleep(1)
+    st.rerun()
+
+
+def get_active_season_year() -> int:
+    """Resolve active season from sidebar mode without requiring explicit prop threading."""
+    mode = str(st.session_state.get("sidebar_season_mode", "2026"))
+    return 2026 if mode.startswith("2026") else 2025
+
+
+@st.cache_data(ttl=1800)
+def get_fastf1_schedule_cached(year: int) -> pd.DataFrame:
+    """Cache FastF1 schedule to reduce repeated remote lookups across tabs."""
     try:
-        # Load combined data (race + sprint) - pass the data directory
-        data_dir = str(Path(DATA_FILES.race_results).parent)
-        df = load_combined_data(data_dir)
-        if df is not None:
-            df = clean_data(df)
-        return df
+        schedule = fastf1.get_event_schedule(year)
+        return schedule.copy() if schedule is not None else pd.DataFrame()
     except Exception as e:
-        logger.error(f"Error loading combined data: {e}")
-        # Fallback to race data only
-        try:
-            df = load_csv_data(str(DATA_FILES.race_results))
-            if df is not None:
-                df = clean_data(df)
-            return df
-        except Exception as e2:
-            logger.error(f"Error loading race data: {e2}")
-            return None
+        logger.warning(f"Could not load FastF1 schedule for {year}: {e}")
+        if year == 2026 and OFFICIAL_2026_CALENDAR:
+            # Local fallback keeps countdown/calendar UI working when network access is blocked.
+            rows = []
+            for item in OFFICIAL_2026_CALENDAR:
+                rows.append(
+                    {
+                        "RoundNumber": item.get("round"),
+                        "EventName": item.get("event"),
+                        "Location": item.get("location"),
+                        "Country": item.get("country"),
+                        "EventDate": pd.to_datetime(item.get("race_date"), errors="coerce", utc=True),
+                        "Session1": None,
+                        "Session1Date": pd.NaT,
+                        "Session2": None,
+                        "Session2Date": pd.NaT,
+                        "Session3": None,
+                        "Session3Date": pd.NaT,
+                        "Session4": None,
+                        "Session4Date": pd.NaT,
+                        "Session5": "Race",
+                        "Session5Date": pd.to_datetime(item.get("race_date"), errors="coerce", utc=True),
+                    }
+                )
+            return pd.DataFrame(rows)
+        return pd.DataFrame()
+
+
+def get_season_race_choices(year: int | None = None) -> list:
+    """Return race names for selected season with API-backed 2026 support and fallback."""
+    year = year or get_active_season_year()
+
+    if year == 2025:
+        return F1_2025_COMPLETED_RACES
+
+    schedule = get_fastf1_schedule_cached(year)
+    if isinstance(schedule, pd.DataFrame) and not schedule.empty:
+        name_col = "EventName" if "EventName" in schedule.columns else ("OfficialEventName" if "OfficialEventName" in schedule.columns else None)
+        if name_col:
+            df = schedule.copy()
+            if "RoundNumber" in df.columns:
+                df = df[pd.to_numeric(df["RoundNumber"], errors="coerce").fillna(0) > 0]
+            names = [str(x) for x in df[name_col].dropna().tolist() if str(x).strip()]
+            if names:
+                return names
+
+    if year == 2026:
+        return [r["event"] for r in OFFICIAL_2026_CALENDAR]
+
+    return []
+
+
+def get_active_season_label() -> str:
+    return str(get_active_season_year())
+
+
+UTC_OFFSET_OPTIONS = [
+    "-12:00", "-11:00", "-10:00", "-09:00", "-08:00", "-07:00", "-06:00", "-05:00",
+    "-04:00", "-03:00", "-02:00", "-01:00", "+00:00", "+01:00", "+02:00", "+03:00",
+    "+04:00", "+05:00", "+05:30", "+06:00", "+07:00", "+08:00", "+09:00", "+09:30",
+    "+10:00", "+11:00", "+12:00", "+13:00", "+14:00"
+]
+
+
+def get_user_utc_offset() -> str:
+    offset = str(st.session_state.get("user_utc_offset", "-05:00"))
+    return offset if offset in UTC_OFFSET_OPTIONS else "-05:00"
+
+
+def apply_user_utc_offset(ts) -> pd.Timestamp:
+    t = pd.to_datetime(ts, errors="coerce", utc=True)
+    if pd.isna(t):
+        return t
+    offset = get_user_utc_offset()
+    sign = -1 if offset.startswith("-") else 1
+    hh_mm = offset[1:] if offset and offset[0] in "+-" else offset
+    try:
+        hh, mm = hh_mm.split(":")
+        delta = pd.Timedelta(hours=int(hh), minutes=int(mm)) * sign
+        return t + delta
+    except Exception:
+        return t
+
+
+def format_user_time(ts, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    t = apply_user_utc_offset(ts)
+    if pd.isna(t):
+        return "N/A"
+    return f"{t.strftime(fmt)} (UTC{get_user_utc_offset()})"
+
+
+@st.cache_data(ttl=300)
+def get_next_race_countdown_summary(year: int) -> dict:
+    """Small cached next-race summary for sidebar/home-level countdown widgets."""
+    now = pd.Timestamp.now(tz="UTC")
+    schedule = get_fastf1_schedule_cached(year)
+    if isinstance(schedule, pd.DataFrame) and not schedule.empty and "EventDate" in schedule.columns:
+        df = schedule.copy()
+        df["EventDate"] = pd.to_datetime(df["EventDate"], errors="coerce", utc=True)
+        if "RoundNumber" in df.columns:
+            df = df[pd.to_numeric(df["RoundNumber"], errors="coerce").fillna(0) > 0]
+        upcoming = df[df["EventDate"] >= now].sort_values("EventDate")
+        if not upcoming.empty:
+            row = upcoming.iloc[0]
+            delta = row["EventDate"] - now
+            secs = max(0, int(delta.total_seconds()))
+            return {
+                "ok": True,
+                "source": "Live Schedule",
+                "event": str(row.get("EventName", "Next Race")),
+                "location": str(row.get("Location", "TBA")),
+                "race_time": row["EventDate"],
+                "days": secs // 86400,
+                "hours": (secs % 86400) // 3600,
+                "minutes": (secs % 3600) // 60,
+                "seconds": secs % 60,
+                "is_race_week": secs <= 7 * 86400,
+            }
+
+    if year == 2026 and OFFICIAL_2026_CALENDAR:
+        rows = pd.DataFrame(OFFICIAL_2026_CALENDAR).copy()
+        rows["race_date"] = pd.to_datetime(rows["race_date"], errors="coerce", utc=True)
+        upcoming = rows[rows["race_date"] >= now].sort_values("race_date")
+        if not upcoming.empty:
+            row = upcoming.iloc[0]
+            secs = max(0, int((row["race_date"] - now).total_seconds()))
+            return {
+                "ok": True,
+                "source": "Official Fallback",
+                "event": str(row.get("event", "Next Race")),
+                "location": str(row.get("location", "TBA")),
+                "race_time": row["race_date"],
+                "days": secs // 86400,
+                "hours": (secs % 86400) // 3600,
+                "minutes": (secs % 3600) // 60,
+                "seconds": secs % 60,
+                "is_race_week": secs <= 7 * 86400,
+            }
+
+    return {"ok": False}
 
 
 @st.cache_data(ttl=3600)
-def load_sprint_data():
-    """Load and cache sprint data."""
+def load_race_data(year: int = 2025):
+    """Load and cache race data (local CSV) for a season if available."""
     try:
-        sprint_file = Path(DATA_FILES.race_results).parent / 'Formula1_2025Season_SprintResults.csv'
+        data_dir = Path(DATA_FILES.race_results).parent
+        race_file = data_dir / f"Formula1_{year}Season_RaceResults.csv"
+        sprint_file = data_dir / f"Formula1_{year}Season_SprintResults.csv"
+
+        if year == 2025:
+            # Keep existing combined loader path for the current local dataset
+            try:
+                df = load_combined_data(str(data_dir))
+                if df is not None:
+                    return clean_data(df)
+            except Exception as e:
+                logger.error(f"Error loading combined local {year} data: {e}")
+
+        if not race_file.exists():
+            # Return empty df for unsupported local seasons (e.g., 2026 pre-season) to keep UI responsive.
+            return pd.DataFrame()
+
+        df_race = load_csv_data(str(race_file))
+        if df_race is None or df_race.empty:
+            return pd.DataFrame()
+        df_race["SessionType"] = "Race"
+        frames = [df_race]
+
+        if sprint_file.exists():
+            df_sprint = load_csv_data(str(sprint_file))
+            if df_sprint is not None and not df_sprint.empty:
+                df_sprint["SessionType"] = "Sprint"
+                frames.append(df_sprint)
+
+        df = pd.concat(frames, ignore_index=True)
+        return clean_data(df) if df is not None and not df.empty else pd.DataFrame()
+    except Exception as e:
+        logger.error(f"Error loading race data for {year}: {e}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=3600)
+def load_sprint_data(year: int = 2025):
+    """Load and cache sprint data for a season if available."""
+    try:
+        sprint_file = Path(DATA_FILES.race_results).parent / f'Formula1_{year}Season_SprintResults.csv'
         if sprint_file.exists():
             df = load_csv_data(str(sprint_file))
             if df is not None:
                 df = clean_data(df)
             return df
-        return None
+        return pd.DataFrame()
     except Exception as e:
-        logger.error(f"Error loading sprint data: {e}")
-        return None
+        logger.error(f"Error loading sprint data for {year}: {e}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=3600)
+def load_preseason_prediction_priors() -> pd.DataFrame:
+    """Load and score aggregated pre-season team priors for early-season prediction confidence."""
+    try:
+        priors = load_preseason_testing_team_features()
+        if priors is None or priors.empty:
+            return pd.DataFrame()
+        out = priors.copy()
+
+        def _rank_to_score(series: pd.Series) -> pd.Series:
+            s = pd.to_numeric(series, errors="coerce")
+            valid = s.dropna()
+            if valid.empty:
+                return pd.Series([np.nan] * len(s), index=s.index)
+            min_v, max_v = valid.min(), valid.max()
+            if min_v == max_v:
+                return pd.Series([1.0 if pd.notna(x) else np.nan for x in s], index=s.index, dtype="float64")
+            return s.apply(lambda x: (max_v - x) / (max_v - min_v) if pd.notna(x) else np.nan)
+
+        out["pre_pace_score"] = _rank_to_score(out.get("preseason_bahrain_pace_rank", pd.Series(dtype=float)))
+        out["pre_mileage_score"] = _rank_to_score(out.get("preseason_bahrain_mileage_rank", pd.Series(dtype=float)))
+        out["pre_spain_participation_score"] = pd.to_numeric(
+            out.get("preseason_spain_shakedown_participated"), errors="coerce"
+        ).fillna(0.0)
+        out["pre_spain_participation_score"] = (
+            out["pre_spain_participation_score"]
+            - 0.25 * pd.to_numeric(out.get("preseason_spain_shakedown_late_start"), errors="coerce").fillna(0.0)
+        ).clip(lower=0.0, upper=1.0)
+
+        out["preseason_prior_score"] = (
+            out["pre_pace_score"].fillna(0) * 0.5
+            + out["pre_mileage_score"].fillna(0) * 0.3
+            + out["pre_spain_participation_score"].fillna(0) * 0.2
+        )
+        out["preseason_prior_coverage"] = (
+            out[["pre_pace_score", "pre_mileage_score", "pre_spain_participation_score"]]
+            .notna()
+            .sum(axis=1)
+            / 3.0
+        )
+        keep_cols = [
+            c for c in [
+                "team_norm",
+                "preseason_prior_score",
+                "preseason_prior_coverage",
+                "pre_pace_score",
+                "pre_mileage_score",
+                "pre_spain_participation_score",
+                "preseason_bahrain_pace_rank",
+                "preseason_bahrain_mileage_rank",
+                "preseason_bahrain_best_lap_sec",
+                "preseason_bahrain_total_laps",
+            ] if c in out.columns
+        ]
+        return out[keep_cols].copy()
+    except Exception as e:
+        logger.warning(f"Could not load pre-season prediction priors: {e}")
+        return pd.DataFrame()
+
+
+def _prediction_confidence_label(score: float) -> str:
+    if pd.isna(score):
+        return "Unknown"
+    if score >= 75:
+        return "High"
+    if score >= 55:
+        return "Medium"
+    return "Low"
+
+
+def _augment_predictions_with_preseason_signals(
+    pred_df: pd.DataFrame,
+    using_live_grid: bool,
+    preseason_weight: float,
+    use_weighted_sort: bool,
+) -> pd.DataFrame:
+    """Add preseason prior scores, scenario ranking, and confidence labels."""
+    if pred_df is None or pred_df.empty:
+        return pred_df
+
+    out = pred_df.copy()
+    priors_df = load_preseason_prediction_priors()
+    if isinstance(priors_df, pd.DataFrame) and not priors_df.empty and "Team" in out.columns:
+        out["team_norm"] = out["Team"].apply(normalize_team_name)
+        out = out.merge(priors_df, on="team_norm", how="left")
+    else:
+        out["preseason_prior_score"] = np.nan
+        out["preseason_prior_coverage"] = np.nan
+
+    # Normalize model prediction into score space (higher = stronger)
+    pred_num = pd.to_numeric(out.get("Predicted_Position"), errors="coerce")
+    valid_pred = pred_num.dropna()
+    if not valid_pred.empty:
+        min_pred, max_pred = valid_pred.min(), valid_pred.max()
+        if min_pred == max_pred:
+            out["model_score_norm"] = 1.0
+        else:
+            out["model_score_norm"] = pred_num.apply(lambda x: (max_pred - x) / (max_pred - min_pred) if pd.notna(x) else np.nan)
+    else:
+        out["model_score_norm"] = np.nan
+
+    out["preseason_prior_score"] = pd.to_numeric(out.get("preseason_prior_score"), errors="coerce")
+    out["preseason_prior_coverage"] = pd.to_numeric(out.get("preseason_prior_coverage"), errors="coerce")
+    w = float(np.clip(preseason_weight, 0.0, 0.5))
+    prior_component = out["preseason_prior_score"].fillna(0.0)
+    if "preseason_prior_coverage" in out.columns:
+        prior_component = prior_component * out["preseason_prior_coverage"].fillna(0.0)
+
+    out["weighted_prerace_score"] = (1.0 - w) * out["model_score_norm"].fillna(0.0) + w * prior_component
+    out["model_component_weighted"] = ((1.0 - w) * out["model_score_norm"].fillna(0.0) * 100.0).round(2)
+    out["prior_component_weighted"] = (w * prior_component * 100.0).round(2)
+    out["Scenario_Rank"] = (
+        out["weighted_prerace_score"]
+        .rank(method="dense", ascending=False)
+        .astype("Int64")
+    )
+    out["Rank_Shift_vs_Model"] = (
+        pd.to_numeric(out.get("Rank"), errors="coerce")
+        - pd.to_numeric(out.get("Scenario_Rank"), errors="coerce")
+    )
+
+    # Confidence score (0-100): model-grid quality + preseason coverage + alignment
+    out["grid_quality_score"] = 85.0 if using_live_grid else 55.0
+    out["prior_coverage_score"] = out["preseason_prior_coverage"].fillna(0.0) * 100.0
+    alignment = 1.0 - (out["model_score_norm"].fillna(0.5) - out["preseason_prior_score"].fillna(out["model_score_norm"].fillna(0.5))).abs()
+    out["prior_alignment_score"] = alignment.clip(lower=0.0, upper=1.0) * 100.0
+    out["Prediction_Confidence_Score"] = (
+        out["grid_quality_score"] * 0.5
+        + out["prior_coverage_score"] * 0.3
+        + out["prior_alignment_score"] * 0.2
+    ).round(1)
+    out["Prediction_Confidence"] = out["Prediction_Confidence_Score"].apply(_prediction_confidence_label)
+
+    def _why_changed_badge(row: pd.Series) -> str:
+        shift = pd.to_numeric(row.get("Rank_Shift_vs_Model"), errors="coerce")
+        coverage = pd.to_numeric(row.get("preseason_prior_coverage"), errors="coerce")
+        pace_rank = pd.to_numeric(row.get("preseason_bahrain_pace_rank"), errors="coerce")
+        mileage_rank = pd.to_numeric(row.get("preseason_bahrain_mileage_rank"), errors="coerce")
+        reasons = []
+
+        if pd.notna(coverage):
+            if coverage >= 0.66:
+                reasons.append("good coverage")
+            elif coverage <= 0.0:
+                reasons.append("no priors")
+            else:
+                reasons.append("partial coverage")
+        if pd.notna(pace_rank):
+            if pace_rank <= 4:
+                reasons.append("strong Bahrain pace")
+            elif pace_rank >= 8:
+                reasons.append("weaker Bahrain pace")
+        if pd.notna(mileage_rank):
+            if mileage_rank <= 4:
+                reasons.append("strong mileage")
+            elif mileage_rank >= 8:
+                reasons.append("low mileage")
+
+        reason_text = ", ".join(reasons[:2]) if reasons else "model-driven"
+        if pd.isna(shift):
+            return f"No shift | {reason_text}"
+        shift_i = int(shift)
+        if shift_i > 0:
+            return f"+{shift_i} | {reason_text}"
+        if shift_i < 0:
+            return f"{shift_i} | {reason_text}"
+        return f"0 | {reason_text}"
+
+    out["Why_Changed"] = out.apply(_why_changed_badge, axis=1)
+
+    if use_weighted_sort:
+        out = out.sort_values(["Scenario_Rank", "Predicted_Position"], ascending=[True, True]).reset_index(drop=True)
+        out["Display_Rank"] = range(1, len(out) + 1)
+    else:
+        out = out.sort_values("Predicted_Position").reset_index(drop=True)
+        out["Display_Rank"] = range(1, len(out) + 1)
+
+    return out.drop(columns=[c for c in ["team_norm"] if c in out.columns])
+
+
+def _render_prediction_results_panel(
+    pred_df: pd.DataFrame,
+    using_live: bool,
+    preseason_weight: float,
+    use_weighted_sort: bool,
+    race_name: str,
+) -> None:
+    """Render prediction table, rank comparison, and per-driver confidence explanation."""
+    if pred_df is None or pred_df.empty:
+        st.info("No prediction results to display.")
+        return
+
+    coverage_ratio = float(
+        pd.to_numeric(pred_df.get("preseason_prior_coverage"), errors="coerce").fillna(0).gt(0).mean()
+    ) if "preseason_prior_coverage" in pred_df.columns else 0.0
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Drivers", len(pred_df))
+    m2.metric("Live Grid", "Yes" if using_live else "Estimated")
+    m3.metric("Pre-season Coverage", f"{coverage_ratio*100:.0f}%")
+    m4.metric("Scenario Weight", f"{preseason_weight:.2f}")
+
+    if "Team" in pred_df.columns:
+        team_summary = (
+            pred_df.groupby("Team", dropna=False)
+            .agg(
+                Drivers=("Driver", "nunique"),
+                Avg_Model_Rank=("Rank", "mean"),
+                Avg_Weighted_Rank=("Scenario_Rank", "mean"),
+                Net_Shift=("Rank_Shift_vs_Model", "sum"),
+                Avg_Confidence=("Prediction_Confidence_Score", "mean"),
+                Avg_Prior=("preseason_prior_score", "mean"),
+                Prior_Coverage=("preseason_prior_coverage", "mean"),
+            )
+            .reset_index()
+        )
+        for col in ["Avg_Model_Rank", "Avg_Weighted_Rank", "Net_Shift", "Avg_Confidence", "Avg_Prior", "Prior_Coverage"]:
+            if col in team_summary.columns:
+                team_summary[col] = pd.to_numeric(team_summary[col], errors="coerce")
+        if "Prior_Coverage" in team_summary.columns:
+            team_summary["Prior_Coverage_Pct"] = (team_summary["Prior_Coverage"].fillna(0) * 100).round(0)
+        if "Net_Shift" in team_summary.columns:
+            team_summary["Shift_Badge"] = team_summary["Net_Shift"].apply(
+                lambda x: "Up vs model" if pd.notna(x) and x > 0 else ("Down vs model" if pd.notna(x) and x < 0 else "Neutral")
+            )
+
+        st.markdown("#### Team Confidence Summary")
+        t1, t2 = st.columns([3, 2])
+        with t1:
+            team_show = team_summary.copy()
+            rename_team_cols = {
+                "Avg_Model_Rank": "Avg_Model_Rank",
+                "Avg_Weighted_Rank": "Avg_Weighted_Rank",
+                "Net_Shift": "Net_Shift",
+                "Avg_Confidence": "Avg_Conf",
+                "Avg_Prior": "Avg_Prior",
+                "Prior_Coverage_Pct": "Prior_Cov_%",
+            }
+            keep_team_cols = [c for c in ["Team", "Drivers", "Avg_Model_Rank", "Avg_Weighted_Rank", "Net_Shift", "Shift_Badge", "Avg_Confidence", "Prior_Coverage_Pct"] if c in team_show.columns]
+            team_show = team_show[keep_team_cols].rename(columns=rename_team_cols)
+            for c in [c for c in team_show.columns if c.startswith("Avg_") or c.endswith("_%") or c == "Net_Shift"]:
+                team_show[c] = pd.to_numeric(team_show[c], errors="coerce").round(2)
+            st.dataframe(team_show.sort_values(["Avg_Weighted_Rank", "Avg_Model_Rank"], na_position="last"), use_container_width=True, hide_index=True)
+        with t2:
+            if {"Team", "Avg_Confidence"}.issubset(team_summary.columns):
+                fig_team_conf = px.bar(
+                    team_summary.sort_values("Avg_Confidence", ascending=True),
+                    x="Avg_Confidence",
+                    y="Team",
+                    orientation="h",
+                    color="Shift_Badge" if "Shift_Badge" in team_summary.columns else None,
+                    text="Avg_Confidence",
+                    title="Avg Confidence by Team",
+                    color_discrete_map={"Up vs model": "#00D2BE", "Down vs model": "#E10600", "Neutral": "#F5B942"},
+                )
+                fig_team_conf.update_layout(
+                    xaxis_title="Confidence score",
+                    yaxis_title="",
+                    margin=dict(l=20, r=20, t=45, b=20),
+                    height=330,
+                    showlegend=False,
+                )
+                show_plotly_chart(fig_team_conf, use_container_width=True)
+
+    display_cols = [
+        c for c in [
+            'Display_Rank', 'Rank', 'Scenario_Rank',
+            'Driver', 'Team', 'Starting Grid', 'Predicted_Position',
+            'Prediction_Confidence', 'Prediction_Confidence_Score',
+            'Rank_Shift_vs_Model', 'Why_Changed',
+            'preseason_prior_score', 'preseason_bahrain_pace_rank',
+            'preseason_bahrain_mileage_rank'
+        ] if c in pred_df.columns
+    ]
+    display_df = pred_df[display_cols].copy()
+    rename_map = {
+        "Display_Rank": "Table_Rank",
+        "Rank": "Model_Rank",
+        "Scenario_Rank": "Weighted_Rank",
+        "Predicted_Position": "Pred_Pos",
+        "Prediction_Confidence": "Confidence",
+        "Prediction_Confidence_Score": "Conf_Score",
+        "Rank_Shift_vs_Model": "Shift_vs_Model",
+        "Why_Changed": "Why_Changed",
+        "preseason_prior_score": "Preseason_Prior",
+        "preseason_bahrain_pace_rank": "BHR_Pace_Rank",
+        "preseason_bahrain_mileage_rank": "BHR_Mileage_Rank",
+    }
+    display_df = display_df.rename(columns=rename_map)
+    if "Shift_vs_Model" in display_df.columns:
+        display_df["Shift_vs_Model"] = pd.to_numeric(display_df["Shift_vs_Model"], errors="coerce").round(0).astype("Int64")
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    if {'Driver', 'Rank', 'Scenario_Rank'}.issubset(pred_df.columns):
+        rank_chart_df = pred_df[['Driver', 'Rank', 'Scenario_Rank']].copy().melt(
+            id_vars='Driver', value_vars=['Rank', 'Scenario_Rank'],
+            var_name='RankType', value_name='RankValue'
+        )
+        fig_rank = px.line(
+            rank_chart_df,
+            x='Driver',
+            y='RankValue',
+            color='RankType',
+            markers=True,
+            title='Model Rank vs Weighted Scenario Rank',
+            color_discrete_map={'Rank': '#00D2BE', 'Scenario_Rank': '#E10600'}
+        )
+        fig_rank.update_layout(
+            yaxis_title='Rank (lower is better)',
+            yaxis_autorange='reversed',
+            xaxis_title='',
+            xaxis_tickangle=-45,
+            margin=dict(l=20, r=20, t=50, b=80)
+        )
+        show_plotly_chart(fig_rank, use_container_width=True)
+
+    with st.expander("Confidence Explanation per Driver", expanded=False):
+        driver_options = pred_df.sort_values("Display_Rank")[["Driver", "Team"]].drop_duplicates()
+        labels = driver_options.apply(lambda r: f"{r['Driver']} ({r['Team']})", axis=1).tolist()
+        if not labels:
+            st.info("No driver rows available.")
+        else:
+            key_suffix = f"{get_active_season_year()}_{race_name}".replace(" ", "_")
+            selected_label = st.selectbox(
+                "Select driver",
+                labels,
+                key=f"pred_conf_explain_driver_{key_suffix}",
+            )
+            selected_driver = selected_label.split(" (")[0]
+            row = pred_df[pred_df["Driver"] == selected_driver].iloc[0]
+
+            rank_shift = pd.to_numeric(row.get("Rank_Shift_vs_Model"), errors="coerce")
+            rank_shift_txt = (
+                f"{int(rank_shift):+d} vs model rank"
+                if pd.notna(rank_shift) else "N/A"
+            )
+
+            x1, x2, x3, x4 = st.columns(4)
+            x1.metric("Model Rank", int(row["Rank"]) if pd.notna(row.get("Rank")) else "N/A")
+            x2.metric("Weighted Rank", int(row["Scenario_Rank"]) if pd.notna(row.get("Scenario_Rank")) else "N/A", rank_shift_txt)
+            x3.metric("Confidence", str(row.get("Prediction_Confidence", "Unknown")))
+            x4.metric("Conf Score", f"{float(pd.to_numeric(row.get('Prediction_Confidence_Score'), errors='coerce')):.1f}" if pd.notna(pd.to_numeric(row.get("Prediction_Confidence_Score"), errors="coerce")) else "N/A")
+
+            def _num(v, default: float = 0.0) -> float:
+                parsed = pd.to_numeric(v, errors="coerce")
+                return float(parsed) if pd.notna(parsed) else float(default)
+
+            grid_quality = _num(row.get("grid_quality_score"))
+            prior_coverage = _num(row.get("prior_coverage_score"))
+            prior_alignment = _num(row.get("prior_alignment_score"))
+
+            contrib_df = pd.DataFrame([
+                {
+                    "Component": "Grid Data Quality (50%)",
+                    "RawScore": grid_quality,
+                    "Weight": 0.50,
+                    "Contribution": grid_quality * 0.50,
+                },
+                {
+                    "Component": "Pre-season Coverage (30%)",
+                    "RawScore": prior_coverage,
+                    "Weight": 0.30,
+                    "Contribution": prior_coverage * 0.30,
+                },
+                {
+                    "Component": "Model/Prior Alignment (20%)",
+                    "RawScore": prior_alignment,
+                    "Weight": 0.20,
+                    "Contribution": prior_alignment * 0.20,
+                },
+            ])
+
+            blend_df = pd.DataFrame([
+                {
+                    "Part": "Model score component",
+                    "WeightedScorePts": float(pd.to_numeric(row.get("model_component_weighted"), errors="coerce")) if pd.notna(pd.to_numeric(row.get("model_component_weighted"), errors="coerce")) else 0.0,
+                },
+                {
+                    "Part": "Pre-season prior component",
+                    "WeightedScorePts": float(pd.to_numeric(row.get("prior_component_weighted"), errors="coerce")) if pd.notna(pd.to_numeric(row.get("prior_component_weighted"), errors="coerce")) else 0.0,
+                },
+            ])
+
+            c_left, c_right = st.columns(2)
+            with c_left:
+                fig_conf = px.bar(
+                    contrib_df.sort_values("Contribution", ascending=True),
+                    x="Contribution",
+                    y="Component",
+                    orientation="h",
+                    text="Contribution",
+                    title="Confidence Score Breakdown",
+                    color="Contribution",
+                    color_continuous_scale="Blues",
+                )
+                fig_conf.update_layout(
+                    xaxis_title="Contribution points (0-100 scale)",
+                    yaxis_title="",
+                    margin=dict(l=20, r=20, t=50, b=20),
+                    height=320,
+                )
+                show_plotly_chart(fig_conf, use_container_width=True)
+                st.dataframe(contrib_df.round(2), use_container_width=True, hide_index=True)
+            with c_right:
+                fig_blend = px.bar(
+                    blend_df,
+                    x="Part",
+                    y="WeightedScorePts",
+                    text="WeightedScorePts",
+                    title="Scenario Rank Blend (Model vs Pre-season Prior)",
+                    color="Part",
+                    color_discrete_map={
+                        "Model score component": "#00D2BE",
+                        "Pre-season prior component": "#E10600",
+                    },
+                )
+                fig_blend.update_layout(
+                    xaxis_title="",
+                    yaxis_title="Weighted score points",
+                    margin=dict(l=20, r=20, t=50, b=20),
+                    height=320,
+                    showlegend=False,
+                )
+                show_plotly_chart(fig_blend, use_container_width=True)
+
+                st.markdown("**Explanation**")
+                grid_source_txt = "live qualifying grid" if using_live else "estimated historical grid"
+                prior_cov = pd.to_numeric(row.get("preseason_prior_coverage"), errors="coerce")
+                prior_cov_pct = float(prior_cov * 100.0) if pd.notna(prior_cov) else 0.0
+                pace_rank = pd.to_numeric(row.get("preseason_bahrain_pace_rank"), errors="coerce")
+                mileage_rank = pd.to_numeric(row.get("preseason_bahrain_mileage_rank"), errors="coerce")
+                st.markdown(f"- Grid source: `{grid_source_txt}`")
+                st.markdown(f"- Pre-season coverage: `{prior_cov_pct:.0f}%`")
+                if pd.notna(pace_rank):
+                    st.markdown(f"- Bahrain pace rank: `{int(pace_rank)}` (lebih kecil = lebih cepat)")
+                if pd.notna(mileage_rank):
+                    st.markdown(f"- Bahrain mileage rank: `{int(mileage_rank)}` (lebih kecil = lebih banyak lap)")
+                if pd.notna(rank_shift):
+                    if rank_shift > 0:
+                        st.markdown(f"- Overlay pre-season menaikkan posisi skenario sebanyak `{int(rank_shift)}`.")
+                    elif rank_shift < 0:
+                        st.markdown(f"- Overlay pre-season menurunkan posisi skenario sebanyak `{abs(int(rank_shift))}`.")
+                    else:
+                        st.markdown("- Overlay pre-season tidak mengubah ranking driver ini.")
+                st.markdown(f"- Baseline model rank tetap tersedia sebagai `Model_Rank`; overlay hanya memengaruhi `Weighted_Rank`.")
+
+            raw_cols = [
+                c for c in [
+                    "Driver", "Team", "Starting Grid", "Predicted_Position", "Rank", "Scenario_Rank",
+                    "weighted_prerace_score", "model_score_norm", "preseason_prior_score", "preseason_prior_coverage",
+                    "grid_quality_score", "prior_coverage_score", "prior_alignment_score",
+                    "model_component_weighted", "prior_component_weighted",
+                    "Prediction_Confidence", "Prediction_Confidence_Score",
+                    "preseason_bahrain_best_lap_sec", "preseason_bahrain_total_laps",
+                    "preseason_bahrain_pace_rank", "preseason_bahrain_mileage_rank"
+                ] if c in pred_df.columns
+            ]
+            with st.expander("Raw driver explanation fields"):
+                st.dataframe(pd.DataFrame([row[raw_cols]]), use_container_width=True, hide_index=True)
+
+    winner = pred_df.iloc[0]
+    rank_label = "Weighted scenario winner" if (use_weighted_sort and preseason_weight > 0) else "Predicted Winner"
+    conf = winner.get('Prediction_Confidence', 'Unknown')
+    st.success(f"{rank_label}: {winner['Driver']} ({winner['Team']}) | Confidence: {conf}")
 
 
 def load_fastf1_session(year: int, race: str, session_type: str, load_telemetry: bool = False):
@@ -269,6 +934,35 @@ def load_fastf1_session(year: int, race: str, session_type: str, load_telemetry:
     except Exception as e:
         logger.error(f"Error loading FastF1 session: {e}")
         return None
+
+
+def get_fastf1_session_state_cached(
+    *,
+    year: int,
+    race: str,
+    session_type: str,
+    load_telemetry: bool = False,
+    cache_namespace: str = "default",
+    force_reload: bool = False,
+):
+    """Reuse loaded FastF1 session objects across reruns for the same selection."""
+    sig = f"{year}|{race}|{session_type}|{int(load_telemetry)}"
+    sig_key = f"{cache_namespace}_sig"
+    obj_key = f"{cache_namespace}_session_obj"
+    err_key = f"{cache_namespace}_last_error"
+
+    if not force_reload and st.session_state.get(sig_key) == sig and obj_key in st.session_state:
+        return st.session_state.get(obj_key)
+
+    setup_fastf1_cache()
+    session = load_fastf1_session(year, race, session_type, load_telemetry=load_telemetry)
+    if session is not None:
+        st.session_state[sig_key] = sig
+        st.session_state[obj_key] = session
+        st.session_state.pop(err_key, None)
+    else:
+        st.session_state[err_key] = f"{race} - {session_type}"
+    return session
 
 
 @st.cache_data(ttl=3600)
@@ -394,7 +1088,7 @@ def render_race_replay_tab():
     with col1:
         selected_race = st.selectbox(
             "Select Race",
-            F1_2025_COMPLETED_RACES,
+            get_season_race_choices(),
             key="replay_race_select"
         )
     
@@ -421,9 +1115,15 @@ def render_race_replay_tab():
         if st.button("Load Web Replay", type="primary", key="load_replay_btn"):
             with st.spinner("Loading telemetry data... This may take 1-2 minutes for first load."):
                 try:
-                    setup_fastf1_cache()
                     session_code = 'S' if session_type == "Sprint" else 'R'
-                    session = load_fastf1_session(2025, selected_race, session_code, load_telemetry=True)
+                    session = get_fastf1_session_state_cached(
+                        year=get_active_season_year(),
+                        race=selected_race,
+                        session_type=session_code,
+                        load_telemetry=True,
+                        cache_namespace="replay_fastf1",
+                        force_reload=True,
+                    )
                     
                     if session is not None:
                         replay_data = get_race_replay_frames(session, session_type=session_code)
@@ -437,7 +1137,7 @@ def render_race_replay_tab():
                     logger.exception("Replay load error")
     
     with btn_col2:
-        if st.button("🖥️ Launch Desktop Replay", type="secondary", key="launch_desktop_btn"):
+        if st.button("Launch Desktop Replay", type="secondary", key="launch_desktop_btn"):
             import subprocess
             import sys
             
@@ -449,13 +1149,13 @@ def render_race_replay_tab():
                 subprocess.Popen([
                     sys.executable,
                     str(script_path),
-                    "--year", "2025",
+                    "--year", str(get_active_season_year()),
                     "--race", selected_race,
                     "--session", session_code
                 ], cwd=str(Path(__file__).parent.parent))
                 
                 st.success("Desktop replay window launching... (Check your taskbar)")
-                st.info("Controls: SPACE=Play/Pause, ←→=Seek, ↑↓=Speed, 1-4=Quick Speed, R=Reset, ESC=Close")
+                st.info("Controls: SPACE=Play/Pause, LEFT/RIGHT=Seek, UP/DOWN=Speed, 1-4=Quick Speed, R=Reset, ESC=Close")
             except Exception as e:
                 st.error(f"Could not launch desktop replay: {e}")
     
@@ -482,7 +1182,15 @@ def render_race_replay_tab():
             st.markdown("**Use the Play/Pause buttons and slider below the track to control playback.**")
             
             try:
-                rotation = get_circuit_rotation(load_fastf1_session(2025, selected_race, 'R', load_telemetry=False)) if track else 0
+                rotation_session = get_fastf1_session_state_cached(
+                    year=get_active_season_year(),
+                    race=selected_race,
+                    session_type='R',
+                    load_telemetry=False,
+                    cache_namespace="replay_rotation_fastf1",
+                    force_reload=False,
+                )
+                rotation = get_circuit_rotation(rotation_session) if track and rotation_session is not None else 0
             except:
                 rotation = 0
             
@@ -522,7 +1230,15 @@ def render_race_replay_tab():
                 current_frame = frames[frame_idx]
                 
                 try:
-                    rotation = get_circuit_rotation(load_fastf1_session(2025, selected_race, 'R', load_telemetry=False)) if track else 0
+                    rotation_session = get_fastf1_session_state_cached(
+                        year=get_active_season_year(),
+                        race=selected_race,
+                        session_type='R',
+                        load_telemetry=False,
+                        cache_namespace="replay_rotation_fastf1",
+                        force_reload=False,
+                    )
+                    rotation = get_circuit_rotation(rotation_session) if track and rotation_session is not None else 0
                 except:
                     rotation = 0
                 
@@ -565,20 +1281,771 @@ def render_race_replay_tab():
                         if telemetry_fig:
                             st.plotly_chart(telemetry_fig, use_container_width=True, config={'displayModeBar': False})
     else:
-        st.info("Select a race and click 'Load Race Replay' to start.")
+        st.info("Select a race and click `Load Web Replay` to start.")
 
 
 def render_header():
     """Render dashboard header."""
-    st.markdown('<h1 class="main-header">F1 2025 Season Dashboard</h1>', unsafe_allow_html=True)
+    st.markdown(f'<h1 class="main-header">F1 {get_active_season_label()} Season Dashboard</h1>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Analytics | Telemetry | Predictions</p>', unsafe_allow_html=True)
+
+
+F1_2026_GRID_TECH_PREVIEW = [
+    {
+        "team_display": "McLaren",
+        "color_key": "McLaren",
+        "base": "Woking, United Kingdom",
+        "team_principal": "Andrea Stella",
+        "car_name_2026": "TBA (2026 launch)",
+        "pu_supplier_2026": "Mercedes",
+        "pu_programme": "Mercedes customer",
+        "drivers_preview": ["Lando Norris", "Oscar Piastri"],
+        "lineup_status": "Tracked",
+        "car_image": "https://media.formula1.com/d_team_car_fallback_image.png/content/dam/fom-website/teams/2024/mclaren.png",
+        "notes": "Reference car image uses latest available team asset until 2026 launch renders are published.",
+    },
+    {
+        "team_display": "Ferrari",
+        "color_key": "Ferrari",
+        "base": "Maranello, Italy",
+        "team_principal": "Frederic Vasseur",
+        "car_name_2026": "TBA (2026 launch)",
+        "pu_supplier_2026": "Ferrari",
+        "pu_programme": "Works PU",
+        "drivers_preview": ["Charles Leclerc", "Lewis Hamilton"],
+        "lineup_status": "Tracked",
+        "car_image": "https://media.formula1.com/d_team_car_fallback_image.png/content/dam/fom-website/teams/2024/ferrari.png",
+        "notes": "Team + driver gallery syncs to local profile library for portraits and career highlights.",
+    },
+    {
+        "team_display": "Mercedes",
+        "color_key": "Mercedes",
+        "base": "Brackley, United Kingdom",
+        "team_principal": "Toto Wolff",
+        "car_name_2026": "TBA (2026 launch)",
+        "pu_supplier_2026": "Mercedes",
+        "pu_programme": "Works PU",
+        "drivers_preview": ["George Russell", "Andrea Kimi Antonelli"],
+        "lineup_status": "Tracked",
+        "car_image": "https://media.formula1.com/d_team_car_fallback_image.png/content/dam/fom-website/teams/2024/mercedes.png",
+        "notes": "2026 technical package preview focuses on PU supplier and regulation impact readiness.",
+    },
+    {
+        "team_display": "Red Bull Racing",
+        "color_key": "Red Bull Racing Honda RBPT",
+        "base": "Milton Keynes, United Kingdom",
+        "team_principal": "Christian Horner",
+        "car_name_2026": "TBA (2026 launch)",
+        "pu_supplier_2026": "Red Bull Ford Powertrains",
+        "pu_programme": "Works PU (RBPT/Ford)",
+        "drivers_preview": ["Max Verstappen", "TBA"],
+        "lineup_status": "Tracker + TBA",
+        "car_image": "https://media.formula1.com/d_team_car_fallback_image.png/content/dam/fom-website/teams/2024/red-bull-racing.png",
+        "notes": "Driver slot tracker updates as official entries are published.",
+    },
+    {
+        "team_display": "Aston Martin",
+        "color_key": "Aston Martin Aramco Mercedes",
+        "base": "Silverstone, United Kingdom",
+        "team_principal": "Mike Krack",
+        "car_name_2026": "TBA (2026 launch)",
+        "pu_supplier_2026": "Honda",
+        "pu_programme": "Works / strategic PU partner",
+        "drivers_preview": ["Fernando Alonso", "Lance Stroll"],
+        "lineup_status": "Tracked",
+        "car_image": "https://media.formula1.com/d_team_car_fallback_image.png/content/dam/fom-website/teams/2024/aston-martin.png",
+        "notes": "2026 PU supplier transition highlighted in the engine matrix.",
+    },
+    {
+        "team_display": "Alpine",
+        "color_key": "Alpine Renault",
+        "base": "Enstone, United Kingdom",
+        "team_principal": "Oliver Oakes",
+        "car_name_2026": "TBA (2026 launch)",
+        "pu_supplier_2026": "Mercedes",
+        "pu_programme": "Customer PU",
+        "drivers_preview": ["Pierre Gasly", "Jack Doohan"],
+        "lineup_status": "Tracked",
+        "car_image": "https://media.formula1.com/d_team_car_fallback_image.png/content/dam/fom-website/teams/2024/alpine.png",
+        "notes": "Power unit programme shown as pre-season preview tracker.",
+    },
+    {
+        "team_display": "Williams",
+        "color_key": "Williams Mercedes",
+        "base": "Grove, United Kingdom",
+        "team_principal": "James Vowles",
+        "car_name_2026": "TBA (2026 launch)",
+        "pu_supplier_2026": "Mercedes",
+        "pu_programme": "Customer PU",
+        "drivers_preview": ["Alexander Albon", "Carlos Sainz"],
+        "lineup_status": "Tracked",
+        "car_image": "https://media.formula1.com/d_team_car_fallback_image.png/content/dam/fom-website/teams/2024/williams.png",
+        "notes": "Barcelona shakedown participation signals are visible in ML/2026 Hub diagnostics.",
+    },
+    {
+        "team_display": "Racing Bulls",
+        "color_key": "Racing Bulls Honda RBPT",
+        "base": "Faenza, Italy",
+        "team_principal": "Laurent Mekies",
+        "car_name_2026": "TBA (2026 launch)",
+        "pu_supplier_2026": "Red Bull Ford Powertrains",
+        "pu_programme": "Customer / family PU",
+        "drivers_preview": ["Yuki Tsunoda", "TBA"],
+        "lineup_status": "Tracker + TBA",
+        "car_image": "https://media.formula1.com/d_team_car_fallback_image.png/content/dam/fom-website/teams/2024/rb.png",
+        "notes": "Second seat shown as tracker slot until final confirmation in source feeds.",
+    },
+    {
+        "team_display": "Audi",
+        "color_key": "Kick Sauber Ferrari",
+        "base": "Hinwil, Switzerland",
+        "team_principal": "Mattia Binotto",
+        "car_name_2026": "TBA (Audi 2026 launch)",
+        "pu_supplier_2026": "Audi",
+        "pu_programme": "Works PU",
+        "drivers_preview": ["Nico Hulkenberg", "Gabriel Bortoleto"],
+        "lineup_status": "Tracked",
+        "car_image": "https://media.formula1.com/d_team_car_fallback_image.png/content/dam/fom-website/teams/2024/kick-sauber.png",
+        "notes": "Car image uses latest available Sauber reference until Audi launch assets are published.",
+    },
+    {
+        "team_display": "Haas",
+        "color_key": "Haas Ferrari",
+        "base": "Kannapolis, USA",
+        "team_principal": "Ayao Komatsu",
+        "car_name_2026": "TBA (2026 launch)",
+        "pu_supplier_2026": "Ferrari",
+        "pu_programme": "Customer PU",
+        "drivers_preview": ["Esteban Ocon", "Oliver Bearman"],
+        "lineup_status": "Tracked",
+        "car_image": "https://media.formula1.com/d_team_car_fallback_image.png/content/dam/fom-website/teams/2024/haas.png",
+        "notes": "Constructor preview keeps car image and engine family visible before season results arrive.",
+    },
+    {
+        "team_display": "Cadillac",
+        "color_key": "Cadillac",
+        "base": "United States / Silverstone (entry operations)",
+        "team_principal": "TBA",
+        "car_name_2026": "TBA (entry debut package)",
+        "pu_supplier_2026": "Customer PU (TBC at launch)",
+        "pu_programme": "Entry team (GM/Cadillac programme evolving)",
+        "drivers_preview": ["TBA", "TBA"],
+        "lineup_status": "New entry",
+        "car_image": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/F1.svg/512px-F1.svg.png",
+        "notes": "Cadillac joins as the 11th team in 2026; lineup and launch assets update as official announcements arrive.",
+    },
+]
+
+F1_2026_REGULATION_METRICS = pd.DataFrame(
+    [
+        {"Metric": "Car Width", "2025": 200, "2026": 190, "Unit": "cm", "Direction": "Smaller"},
+        {"Metric": "Car Length", "2025": 360, "2026": 340, "Unit": "cm", "Direction": "Shorter"},
+        {"Metric": "Minimum Weight", "2025": 798, "2026": 768, "Unit": "kg", "Direction": "Lighter"},
+        {"Metric": "PU Electric Share", "2025": 20, "2026": 50, "Unit": "%", "Direction": "Higher"},
+    ]
+)
+
+F1_2026_REGULATION_FEATURES = [
+    {"feature": "Active Aero", "status": "New", "impact": "Straight-line efficiency + cornering balance modes"},
+    {"feature": "MGU-H", "status": "Removed", "impact": "Simpler PU package and new energy deployment strategies"},
+    {"feature": "Sustainable Fuel", "status": "100%", "impact": "Fuel development becomes a performance lever"},
+    {"feature": "Chassis Package", "status": "Smaller/Lighter", "impact": "Agility, braking, and tyre load patterns change"},
+    {"feature": "Energy Deployment", "status": "Higher Electric Share", "impact": "Race strategy and overtaking energy management shift"},
+]
+
+
+def _countdown_parts_precise(target_ts, now: pd.Timestamp | None = None) -> dict:
+    now_ts = pd.Timestamp.now(tz="UTC") if now is None else pd.to_datetime(now, errors="coerce", utc=True)
+    target = pd.to_datetime(target_ts, errors="coerce", utc=True)
+    if pd.isna(now_ts) or pd.isna(target):
+        return {"ok": False, "total_seconds": None, "days": None, "hours": None, "minutes": None, "seconds": None}
+    total_seconds = max(0, int((target - now_ts).total_seconds()))
+    return {
+        "ok": True,
+        "total_seconds": total_seconds,
+        "days": total_seconds // 86400,
+        "hours": (total_seconds % 86400) // 3600,
+        "minutes": (total_seconds % 3600) // 60,
+        "seconds": total_seconds % 60,
+    }
+
+
+def _countdown_text_precise(target_ts, now: pd.Timestamp | None = None) -> str:
+    p = _countdown_parts_precise(target_ts, now)
+    if not p.get("ok"):
+        return "N/A"
+    return f"{p['days']}d {p['hours']}h {p['minutes']}m {p['seconds']}s"
+
+
+@st.cache_data(ttl=3600)
+def get_2026_calendar_preview_df() -> pd.DataFrame:
+    if not OFFICIAL_2026_CALENDAR:
+        return pd.DataFrame()
+    d = pd.DataFrame(OFFICIAL_2026_CALENDAR).copy()
+    if d.empty:
+        return d
+    d["race_date"] = pd.to_datetime(d["race_date"], errors="coerce", utc=True)
+    d["month"] = d["race_date"].dt.strftime("%b")
+    d["month_num"] = d["race_date"].dt.month
+    if "event" in d.columns:
+        d["is_sprint"] = d["event"].isin(SPRINT_2026)
+    d = d.sort_values("race_date").reset_index(drop=True)
+    d["round_idx"] = np.arange(1, len(d) + 1)
+    return d
+
+
+@st.cache_data(ttl=3600)
+def get_2026_grid_tech_preview_df() -> pd.DataFrame:
+    d = pd.DataFrame(F1_2026_GRID_TECH_PREVIEW).copy()
+    if d.empty:
+        return d
+    d["team_color"] = d["color_key"].apply(lambda x: TEAM_COLORS.get(x, "#888888"))
+    d["drivers_label"] = d["drivers_preview"].apply(lambda x: " / ".join([str(v) for v in (x or [])]))
+    return d
+
+
+@st.cache_data(ttl=3600)
+def get_2026_driver_gallery_df() -> pd.DataFrame:
+    tech_df = get_2026_grid_tech_preview_df()
+    rows = []
+    for _, row in tech_df.iterrows():
+        for idx, driver in enumerate(row.get("drivers_preview", []) or [], start=1):
+            prof = DRIVER_PROFILES.get(driver, {})
+            rows.append(
+                {
+                    "Driver": driver,
+                    "Team": row.get("team_display"),
+                    "Slot": idx,
+                    "Lineup_Status": row.get("lineup_status"),
+                    "PU_Supplier_2026": row.get("pu_supplier_2026"),
+                    "Team_Color": row.get("team_color"),
+                    "Image": prof.get("image_url"),
+                    "Number": prof.get("number"),
+                    "Country": prof.get("country"),
+                    "Debut": prof.get("debut"),
+                    "Titles": prof.get("titles"),
+                    "Wins": prof.get("wins"),
+                    "Podiums": prof.get("podiums"),
+                    "Bio": prof.get("bio"),
+                }
+            )
+    out = pd.DataFrame(rows)
+    if not out.empty:
+        out["Has_Image"] = out["Image"].fillna("").astype(str).str.len() > 0
+    return out
+
+
+def _find_schedule_event_row(year: int, race_name: str):
+    sched = get_fastf1_schedule_cached(year)
+    if not isinstance(sched, pd.DataFrame) or sched.empty or "EventName" not in sched.columns:
+        return None
+    df = sched.copy()
+    m = df[df["EventName"].astype(str).str.lower() == str(race_name).lower()]
+    if m.empty:
+        m = df[df["EventName"].astype(str).str.contains(str(race_name), case=False, na=False)]
+    if m.empty:
+        return None
+    row = m.iloc[0].copy()
+    for c in [x for x in row.index if str(x).endswith("Date")]:
+        row[c] = pd.to_datetime(row[c], errors="coerce", utc=True)
+    return row
+
+
+def _render_data_availability_badges(items: list[tuple[str, bool, str]]) -> None:
+    chips = []
+    for label, ok, _note in items:
+        bg = "rgba(0,210,190,0.15)" if ok else "rgba(245,185,66,0.14)"
+        fg = "#bff8f2" if ok else "#ffe5a8"
+        border = "rgba(0,210,190,0.35)" if ok else "rgba(245,185,66,0.35)"
+        chips.append(
+            f"<span style='display:inline-block; margin:4px 6px 0 0; padding:4px 10px; border-radius:999px; "
+            f"border:1px solid {border}; background:{bg}; color:{fg}; font-size:12px; font-weight:700;'>{label}: {'Ready' if ok else 'Pending'}</span>"
+        )
+    if chips:
+        st.markdown("".join(chips), unsafe_allow_html=True)
+    with st.expander("Availability details"):
+        st.dataframe(
+            pd.DataFrame([{"Data": label, "Status": "Ready" if ok else "Pending", "Notes": note} for label, ok, note in items]),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+def _render_2026_season_overview_fallback() -> None:
+    st.info("Race results are not loaded yet for 2026. Showing an interactive pre-season dashboard (calendar, grid, tech, regulations, and live data services).")
+
+    cal_df = get_2026_calendar_preview_df()
+    tech_df = get_2026_grid_tech_preview_df()
+    priors_df = load_preseason_prediction_priors()
+    next_race = get_next_race_countdown_summary(2026)
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Calendar Rounds", len(cal_df))
+    m2.metric("Sprint Weekends", int(cal_df["is_sprint"].fillna(False).sum()) if isinstance(cal_df, pd.DataFrame) and not cal_df.empty and "is_sprint" in cal_df.columns else 0)
+    m3.metric("Teams Tracked", len(tech_df))
+    m4.metric("PU Suppliers", tech_df["pu_supplier_2026"].nunique() if isinstance(tech_df, pd.DataFrame) and not tech_df.empty else 0)
+    countdown_value = (
+        f"{int(next_race.get('days', 0))}d {int(next_race.get('hours', 0))}h {int(next_race.get('minutes', 0))}m {int(next_race.get('seconds', 0))}s"
+        if next_race.get("ok") else "N/A"
+    )
+    m5.metric("Next Race Countdown", countdown_value)
+
+    if next_race.get("ok"):
+        badge_text = "RACE WEEK" if next_race.get("is_race_week") else "COUNTDOWN ACTIVE"
+        st.markdown(
+            f"""
+            <div style="border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:12px 14px; margin:8px 0 12px 0;
+                        background:linear-gradient(135deg, rgba(225,6,0,0.10), rgba(0,210,190,0.08));">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                    <div>
+                        <div style="font-size:12px; color:#b8c2d4; text-transform:uppercase; letter-spacing:1px;">Next Round</div>
+                        <div style="font-size:18px; font-weight:800; color:#f2f5fb;">{next_race.get('event')}</div>
+                        <div style="font-size:13px; color:#c8d2e2;">{next_race.get('location')} | {format_user_time(next_race.get('race_time'), '%d %b %Y %H:%M:%S')}</div>
+                    </div>
+                    <div style="padding:4px 10px; border:1px solid rgba(0,210,190,0.35); border-radius:999px; background:rgba(0,210,190,0.14); color:#bff8f2; font-size:12px; font-weight:700;">{badge_text}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    left, right = st.columns([3, 2])
+    with left:
+        st.markdown("### 2026 Calendar & Championship Roadmap")
+        if isinstance(cal_df, pd.DataFrame) and not cal_df.empty:
+            plot_df = cal_df.copy()
+            plot_df["date_local"] = plot_df["race_date"].apply(lambda x: apply_user_utc_offset(x))
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=plot_df["date_local"],
+                    y=plot_df["round_idx"],
+                    mode="lines+markers+text",
+                    text=plot_df["round"],
+                    textposition="top center",
+                    line=dict(color="#E10600", width=2),
+                    marker=dict(size=9, color=np.where(plot_df["is_sprint"].fillna(False), "#00D2BE", "#E10600")),
+                    customdata=plot_df[["event", "location", "country", "is_sprint"]],
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>Round %{text}<br>%{customdata[1]}, %{customdata[2]}"
+                        "<br>Date: %{x|%Y-%m-%d %H:%M}<br>Sprint: %{customdata[3]}<extra></extra>"
+                    ),
+                )
+            )
+            fig.update_layout(
+                height=360,
+                xaxis_title=f"Race Date (UTC{get_user_utc_offset()})",
+                yaxis_title="Round",
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white"),
+                margin=dict(l=10, r=10, t=10, b=40),
+            )
+            show_plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Calendar preview is loading.")
+    with right:
+        st.markdown("### Power Unit Supplier Mix (2026)")
+        if isinstance(tech_df, pd.DataFrame) and not tech_df.empty:
+            pu_counts = tech_df.groupby("pu_supplier_2026").size().reset_index(name="Teams")
+            fig = px.pie(pu_counts, names="pu_supplier_2026", values="Teams", hole=0.45, title="Teams per supplier")
+            fig.update_layout(
+                height=360,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white"),
+                margin=dict(l=10, r=10, t=55, b=10),
+            )
+            show_plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Grid tech preview is loading.")
+
+    st.markdown("### Championship Standings (Pre-season Mode)")
+    a1, a2 = st.columns([1, 3])
+    with a1:
+        if st.button("Refresh Data Services", key="season_overview_2026_refresh_services"):
+            st.session_state["season_overview_2026_refresh_nonce"] = st.session_state.get("season_overview_2026_refresh_nonce", 0) + 1
+            st.rerun()
+    with a2:
+        st.caption("When official standings are unavailable, the dashboard shows pre-season readiness and rollout indicators.")
+
+    nonce = int(st.session_state.get("season_overview_2026_refresh_nonce", 0))
+    try:
+        snapshot = load_2026_api_snapshot(nonce)
+    except Exception as e:
+        snapshot = {}
+        st.warning(f"Could not refresh data services snapshot: {e}")
+
+    drv_df = snapshot.get("jolpica_driver", {}).get("data", pd.DataFrame()) if isinstance(snapshot, dict) else pd.DataFrame()
+    ctor_df = snapshot.get("jolpica_constructor", {}).get("data", pd.DataFrame()) if isinstance(snapshot, dict) else pd.DataFrame()
+
+    b1, b2 = st.columns(2)
+    with b1:
+        st.markdown("**Drivers Championship**")
+        if isinstance(drv_df, pd.DataFrame) and not drv_df.empty:
+            st.dataframe(drv_df.head(20), hide_index=True, use_container_width=True)
+        elif isinstance(priors_df, pd.DataFrame) and not priors_df.empty:
+            pri = priors_df.copy().sort_values("preseason_prior_score", ascending=False)
+            fig = px.bar(
+                pri.head(10),
+                x="preseason_prior_score",
+                y="team_norm",
+                orientation="h",
+                color="preseason_prior_coverage",
+                title="Pre-season Readiness Signal (Teams)",
+                color_continuous_scale="Tealgrn",
+            )
+            fig.update_layout(
+                yaxis={"categoryorder": "total ascending"},
+                height=360,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white"),
+                margin=dict(l=10, r=10, t=55, b=20),
+            )
+            show_plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Official standings will populate after race results are published.")
+    with b2:
+        st.markdown("**Constructors Championship**")
+        if isinstance(ctor_df, pd.DataFrame) and not ctor_df.empty:
+            st.dataframe(ctor_df.head(11), hide_index=True, use_container_width=True)
+        elif isinstance(tech_df, pd.DataFrame) and not tech_df.empty:
+            supplier_count = tech_df.groupby("pu_supplier_2026").size().reset_index(name="teams")
+            fig = px.bar(supplier_count, x="pu_supplier_2026", y="teams", color="pu_supplier_2026", title="PU Supplier Coverage (Grid Preview)")
+            fig.update_layout(
+                height=360,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white"),
+                showlegend=False,
+                margin=dict(l=10, r=10, t=55, b=30),
+                xaxis_title="",
+                yaxis_title="Teams",
+            )
+            show_plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Constructor preview is loading.")
+
+    st.markdown("### Championship Progression Dashboard (Interactive)")
+    p1, p2 = st.columns([2, 2])
+    with p1:
+        if isinstance(cal_df, pd.DataFrame) and not cal_df.empty:
+            now = pd.Timestamp.now(tz="UTC")
+            table_df = cal_df[["round", "race_date", "event", "location", "country", "is_sprint"]].copy()
+            table_df["Countdown"] = table_df["race_date"].apply(lambda x: _countdown_text_precise(x, now))
+            table_df["race_date"] = table_df["race_date"].apply(lambda x: format_user_time(x, "%Y-%m-%d %H:%M:%S"))
+            table_df = table_df.rename(columns={"race_date": f"Race Date (UTC{get_user_utc_offset()})"})
+            st.dataframe(table_df.head(12), hide_index=True, use_container_width=True)
+        else:
+            st.info("Calendar table is loading.")
+    with p2:
+        reg_df = F1_2026_REGULATION_METRICS.copy()
+        fig = go.Figure()
+        for yr, color in [("2025", "#6b7280"), ("2026", "#00D2BE")]:
+            fig.add_trace(
+                go.Bar(
+                    x=reg_df["Metric"],
+                    y=reg_df[yr],
+                    name=yr,
+                    marker_color=color,
+                    text=[f"{v}{u}" for v, u in zip(reg_df[yr], reg_df["Unit"])],
+                    textposition="outside",
+                )
+            )
+        fig.update_layout(
+            barmode="group",
+            height=380,
+            title="2025 vs 2026 Regulations (Key Metrics)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            margin=dict(l=10, r=10, t=55, b=40),
+            xaxis_title="",
+        )
+        show_plotly_chart(fig, use_container_width=True)
+
+
+def _render_2026_driver_gallery_fallback() -> None:
+    st.info("Driver Profiles is using the 2026 grid tracker until race-result data is available.")
+    drivers_df = get_2026_driver_gallery_df()
+    if drivers_df.empty:
+        st.warning("Driver gallery preview is not available.")
+        return
+
+    c1, c2, c3 = st.columns([1.2, 1.2, 2.2])
+    with c1:
+        teams = sorted([t for t in drivers_df["Team"].dropna().astype(str).unique().tolist() if t])
+        team_filter = st.selectbox("Team Filter", ["All Teams"] + teams, key="drivers_2026_team_filter")
+    with c2:
+        portrait_filter = st.selectbox("Portrait Filter", ["All", "Has Image", "Missing Image"], key="drivers_2026_portrait_filter")
+    with c3:
+        search = st.text_input("Search Driver", value="", key="drivers_2026_search")
+
+    view_df = drivers_df.copy()
+    if team_filter != "All Teams":
+        view_df = view_df[view_df["Team"] == team_filter]
+    if portrait_filter == "Has Image":
+        view_df = view_df[view_df["Has_Image"] == True]
+    elif portrait_filter == "Missing Image":
+        view_df = view_df[view_df["Has_Image"] == False]
+    if search.strip():
+        view_df = view_df[view_df["Driver"].astype(str).str.contains(search.strip(), case=False, na=False)]
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Drivers Shown", len(view_df))
+    m2.metric("Teams", view_df["Team"].nunique())
+    m3.metric("Portraits", int(view_df["Has_Image"].sum()) if "Has_Image" in view_df.columns else 0)
+    m4.metric("PU Suppliers", view_df["PU_Supplier_2026"].nunique() if "PU_Supplier_2026" in view_df.columns else 0)
+
+    selectable_df = view_df.copy()
+    if not selectable_df.empty:
+        selectable_df["DriverLabel"] = selectable_df.apply(
+            lambda r: f"{r['Driver']} ({r['Team']})" if str(r.get("Driver", "")).strip().upper() == "TBA" else str(r.get("Driver", "")),
+            axis=1,
+        )
+    selectable = selectable_df["DriverLabel"].tolist() if not selectable_df.empty else []
+    if selectable:
+        selected_label = st.selectbox("Select Driver Card", selectable, key="drivers_2026_select_card")
+        row = selectable_df[selectable_df["DriverLabel"] == selected_label].iloc[0]
+        selected_driver = str(row.get("Driver", "TBA"))
+        team_color = row.get("Team_Color") or "#E10600"
+        prof = DRIVER_PROFILES.get(selected_driver, {})
+        st.markdown(
+            f"""
+            <div style="padding:14px; border-radius:14px; margin:10px 0 14px 0; border:1px solid {team_color}55;
+                        background:linear-gradient(135deg, {team_color}22, rgba(14,17,23,0.95));">
+                <div style="font-size:12px; color:#b8c2d4; text-transform:uppercase; letter-spacing:1px;">2026 Driver Tracker</div>
+                <div style="font-size:22px; font-weight:800; color:#f2f5fb;">{selected_driver}</div>
+                <div style="font-size:13px; color:#c8d2e2;">{row.get('Team', 'Unknown')} | PU: {row.get('PU_Supplier_2026', 'TBA')} | Status: {row.get('Lineup_Status', 'Tracked')}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        d1, d2 = st.columns([1, 2])
+        with d1:
+            if row.get("Image"):
+                st.image(row["Image"], use_container_width=True)
+            else:
+                st.warning("Portrait not available in local profile library.")
+        with d2:
+            i1, i2, i3, i4 = st.columns(4)
+            i1.metric("Number", prof.get("number", row.get("Number") or "TBA"))
+            i2.metric("Titles", int(prof.get("titles", 0)) if pd.notna(prof.get("titles", 0)) else 0)
+            i3.metric("Wins", int(prof.get("wins", 0)) if pd.notna(prof.get("wins", 0)) else 0)
+            i4.metric("Podiums", int(prof.get("podiums", 0)) if pd.notna(prof.get("podiums", 0)) else 0)
+            st.markdown(f"**Country:** {row.get('Country') or prof.get('country', 'N/A')}")
+            st.markdown(f"**Debut:** {prof.get('debut', row.get('Debut') or 'N/A')}")
+            if prof.get("bio"):
+                st.caption(prof["bio"])
+
+    if not view_df.empty:
+        country_counts = view_df["Country"].fillna("Unknown").value_counts().head(12).reset_index()
+        country_counts.columns = ["Country", "Drivers"]
+        fig = px.bar(country_counts, x="Drivers", y="Country", orientation="h", title="Driver Pool by Country")
+        fig.update_layout(
+            yaxis={"categoryorder": "total ascending"},
+            height=340,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            margin=dict(l=10, r=10, t=55, b=20),
+        )
+        show_plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No drivers match the current filters.")
+
+    show_cols = [c for c in ["Driver", "Team", "Slot", "Lineup_Status", "PU_Supplier_2026", "Country", "Number", "Has_Image"] if c in view_df.columns]
+    st.dataframe(view_df[show_cols], hide_index=True, use_container_width=True)
+
+
+def _render_2026_constructor_tech_fallback(key_prefix: str = "constructors_2026") -> None:
+    st.info("Constructor Analysis is showing the 2026 Grid & Tech preview until race-result data becomes available.")
+    tech_df = get_2026_grid_tech_preview_df()
+    if tech_df.empty:
+        st.warning("Constructor tech preview is not available.")
+        return
+
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        selected_team = st.selectbox(
+            "Select Team",
+            tech_df["team_display"].tolist(),
+            key=f"{key_prefix}_team_selector",
+        )
+    with c2:
+        pu_opts = sorted(tech_df["pu_supplier_2026"].dropna().unique().tolist())
+        pu_filter = st.multiselect(
+            "PU Supplier Filter",
+            pu_opts,
+            default=pu_opts,
+            key=f"{key_prefix}_pu_filter",
+        )
+    filtered = tech_df[tech_df["pu_supplier_2026"].isin(pu_filter)] if pu_filter else tech_df.copy()
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Teams", len(filtered))
+    m2.metric("Suppliers", filtered["pu_supplier_2026"].nunique())
+    m3.metric("Tracked Lineups", int(filtered["lineup_status"].astype(str).str.contains("Tracked", case=False, na=False).sum()))
+    m4.metric("New Entries", int(filtered["lineup_status"].astype(str).str.contains("New", case=False, na=False).sum()))
+
+    g1, g2 = st.columns(2)
+    with g1:
+        pu_count = filtered.groupby("pu_supplier_2026").size().reset_index(name="Teams")
+        fig = px.bar(pu_count, x="pu_supplier_2026", y="Teams", color="pu_supplier_2026", title="Engine / PU Supplier Matrix")
+        fig.update_layout(
+            height=330,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            showlegend=False,
+            margin=dict(l=10, r=10, t=55, b=30),
+            xaxis_title="",
+        )
+        show_plotly_chart(fig, use_container_width=True)
+    with g2:
+        base_count = filtered["base"].fillna("Unknown").astype(str).str.split(",").str[-1].str.strip().value_counts().reset_index()
+        base_count.columns = ["Country", "Teams"]
+        fig = px.pie(base_count, names="Country", values="Teams", hole=0.45, title="Team Base Countries")
+        fig.update_layout(
+            height=330,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            margin=dict(l=10, r=10, t=55, b=10),
+        )
+        show_plotly_chart(fig, use_container_width=True)
+
+    row = tech_df[tech_df["team_display"] == selected_team].iloc[0]
+    team_color = row.get("team_color") or "#E10600"
+    st.markdown(
+        f"""
+        <div style="padding:14px; border-radius:14px; border:1px solid {team_color}55; margin:6px 0 12px 0;
+                    background:linear-gradient(135deg, {team_color}20, rgba(14,17,23,0.96));">
+            <div style="font-size:12px; color:#b8c2d4; text-transform:uppercase; letter-spacing:1px;">2026 Grid & Tech</div>
+            <div style="font-size:22px; font-weight:800; color:#f2f5fb;">{row.get('team_display')}</div>
+            <div style="font-size:13px; color:#c8d2e2;">{row.get('base')} | {row.get('pu_programme')} | Line-up status: {row.get('lineup_status')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    v1, v2 = st.columns([1, 2])
+    with v1:
+        if row.get("car_image"):
+            st.image(row["car_image"], use_container_width=True)
+            st.caption("Latest available car image reference (2026 launch render updates later).")
+    with v2:
+        x1, x2, x3, x4 = st.columns(4)
+        x1.metric("Car", row.get("car_name_2026", "TBA"))
+        x2.metric("PU Supplier", row.get("pu_supplier_2026", "TBA"))
+        x3.metric("Team Principal", row.get("team_principal", "TBA"))
+        x4.metric("Driver Slots", len(row.get("drivers_preview", []) or []))
+        st.markdown(f"**Driver Tracker:** {row.get('drivers_label', 'TBA')}")
+        st.caption(row.get("notes", ""))
+
+    driver_cols = st.columns(max(1, min(3, len(row.get("drivers_preview", []) or []))))
+    for idx, driver_name in enumerate(row.get("drivers_preview", []) or []):
+        with driver_cols[idx % len(driver_cols)]:
+            prof = DRIVER_PROFILES.get(driver_name, {})
+            st.markdown(f"**{driver_name}**")
+            if prof.get("image_url"):
+                st.image(prof["image_url"], use_container_width=True)
+            else:
+                st.caption("Portrait pending")
+            st.caption(f"No. {prof.get('number', 'TBA')} | {prof.get('country', 'N/A')}")
+
+    show_cols = ["team_display", "drivers_label", "pu_supplier_2026", "pu_programme", "car_name_2026", "team_principal", "base", "lineup_status"]
+    st.dataframe(filtered[show_cols], hide_index=True, use_container_width=True)
+
+
+def render_2026_grid_tech_tab() -> None:
+    st.header("2026 Grid & Tech Center")
+    _render_2026_constructor_tech_fallback(key_prefix="gridtech_2026")
+
+
+def render_2026_regulations_tab() -> None:
+    st.header("2026 Regulations Center")
+    st.markdown("Interactive dashboard for the 2026 technical and sporting reset, including PU changes, chassis metrics, and rollout timeline.")
+
+    reg_df = F1_2026_REGULATION_METRICS.copy()
+    feat_df = pd.DataFrame(F1_2026_REGULATION_FEATURES)
+    updates_df = pd.DataFrame(OFFICIAL_2026_UPDATES).copy()
+    if not updates_df.empty:
+        updates_df["date"] = pd.to_datetime(updates_df["date"], errors="coerce")
+        updates_df = updates_df.sort_values("date", ascending=False)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Key Metrics", len(reg_df))
+    m2.metric("Feature Changes", len(feat_df))
+    m3.metric("Official Updates", len(updates_df))
+    m4.metric("PU Electric Share", "50%")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=reg_df["Metric"], y=reg_df["2025"], name="2025", marker_color="#6b7280"))
+        fig.add_trace(go.Bar(x=reg_df["Metric"], y=reg_df["2026"], name="2026", marker_color="#00D2BE"))
+        fig.update_layout(
+            barmode="group",
+            height=360,
+            title="Core Package Metrics: 2025 vs 2026",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            margin=dict(l=10, r=10, t=55, b=30),
+        )
+        show_plotly_chart(fig, use_container_width=True)
+    with c2:
+        pu_split = pd.DataFrame({"Component": ["Electric", "ICE"], "Share": [50, 50]})
+        fig = px.pie(pu_split, names="Component", values="Share", hole=0.5, title="2026 Power Unit Energy Split Target")
+        fig.update_layout(
+            height=360,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            margin=dict(l=10, r=10, t=55, b=10),
+        )
+        show_plotly_chart(fig, use_container_width=True)
+
+    st.markdown("### Regulation Impact Board")
+    status_filter = st.multiselect(
+        "Filter by Status",
+        sorted(feat_df["status"].unique().tolist()),
+        default=sorted(feat_df["status"].unique().tolist()),
+        key="regs_2026_status_filter",
+    )
+    filtered_feat = feat_df[feat_df["status"].isin(status_filter)] if status_filter else feat_df.copy()
+    st.dataframe(filtered_feat, hide_index=True, use_container_width=True)
+
+    st.markdown("### Official Rollout Timeline")
+    if not updates_df.empty:
+        cat_opts = sorted([c for c in updates_df["category"].dropna().astype(str).unique().tolist() if c])
+        cat_sel = st.multiselect("Category Filter", cat_opts, default=cat_opts, key="regs_2026_cat_filter")
+        u = updates_df[updates_df["category"].isin(cat_sel)] if cat_sel else updates_df.copy()
+        fig = px.scatter(u, x="date", y="category", color="source", hover_data=["title"], title="2026 Update Timeline (Official Sources)")
+        fig.update_layout(
+            height=360,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            margin=dict(l=10, r=10, t=55, b=20),
+            xaxis_title="Date",
+            yaxis_title="Category",
+        )
+        show_plotly_chart(fig, use_container_width=True)
+        st.dataframe(u[["date", "category", "title", "source", "url"]], hide_index=True, use_container_width=True)
+    else:
+        st.info("Official update timeline is loading.")
 
 
 def render_overview_tab(df, total_points_combined=None):
     """Season Overview tab content."""
-    st.header("2025 Season Overview")
+    st.header(f"{get_active_season_label()} Season Overview")
     
     if df is None or df.empty:
+        if get_active_season_year() == 2026:
+            _render_2026_season_overview_fallback()
+            return
         st.error("No data available")
         return
     
@@ -653,7 +2120,7 @@ def render_overview_tab(df, total_points_combined=None):
     with col2:
         st.markdown("**Constructors Championship**")
         # Load sprint data and calculate combined standings
-        df_sprint = load_sprint_data()
+        df_sprint = load_sprint_data(get_active_season_year())
         if df_sprint is not None:
             constructor_standings = calculate_combined_constructor_standings(df, df_sprint)
         else:
@@ -730,14 +2197,18 @@ def render_drivers_tab(df, total_points_combined=None):
     st.header("Driver Profiles")
     
     if df is None or df.empty:
+        if get_active_season_year() == 2026:
+            _render_2026_driver_gallery_fallback()
+            return
         st.error("No data available")
         return
     
-    drivers_2025 = sorted([d for d in df['Driver'].unique().tolist() if d in DRIVER_PROFILES])
+    active_year = get_active_season_year()
+    drivers_available = sorted([d for d in df['Driver'].unique().tolist() if d in DRIVER_PROFILES])
     
     col_sel, _ = st.columns([1, 3])
     with col_sel:
-        selected_driver = st.selectbox("Select Driver", drivers_2025, key="driver_profile_selector")
+        selected_driver = st.selectbox("Select Driver", drivers_available, key="driver_profile_selector")
     
     if selected_driver:
         profile = DRIVER_PROFILES.get(selected_driver, {})
@@ -771,7 +2242,7 @@ def render_drivers_tab(df, total_points_combined=None):
             st.markdown(f"""
             **Nationality:** {profile.get('country', 'N/A')}  
             **Debut:** {profile.get('debut', 'N/A')}  
-            **Seasons:** {2025 - profile.get('debut', 2025) if isinstance(profile.get('debut'), int) else 'N/A'}
+            **Seasons:** {active_year - profile.get('debut', active_year) if isinstance(profile.get('debut'), int) else 'N/A'}
             """)
             st.info(profile.get('bio', ''))
 
@@ -800,8 +2271,8 @@ def render_drivers_tab(df, total_points_combined=None):
                 st.dataframe(pd.DataFrame(c_data), hide_index=True, use_container_width=True)
 
         with col_stats:
-            # 2025 Season Performance
-            st.subheader("2025 Season Performance")
+            # Active season performance
+            st.subheader(f"{active_year} Season Performance")
             
             # Stats Calculation
             race_points = driver_df['Points'].sum()
@@ -862,7 +2333,7 @@ def render_drivers_tab(df, total_points_combined=None):
             show_plotly_chart(fig, use_container_width=True)
             
             # Results Table
-            with st.expander("Full 2025 Results"):
+            with st.expander(f"Full {active_year} Results"):
                 res_cols = ['Track', 'Starting Grid', 'Position', 'Points', 'Laps']
                 valid_cols = [c for c in res_cols if c in driver_df.columns]
                 st.dataframe(driver_df[valid_cols], hide_index=True, use_container_width=True)
@@ -873,6 +2344,9 @@ def render_teams_tab(df):
     st.header("Constructor Analysis")
     
     if df is None or df.empty:
+        if get_active_season_year() == 2026:
+            _render_2026_constructor_tech_fallback(key_prefix="constructors_fallback_2026")
+            return
         st.error("No data available")
         return
     
@@ -1088,7 +2562,7 @@ def render_teams_tab(df):
         st.divider()
         
         # Team Specifications
-        st.subheader("2025 Technical Specifications")
+        st.subheader(f"{get_active_season_label()} Technical Specifications")
         
         col1, col2, col3, col4 = st.columns(4)
         
@@ -1122,12 +2596,13 @@ def render_teams_tab(df):
         with col3:
             st.metric("Constructor Titles", team_info.get('constructor_titles', 0))
         with col4:
-            st.metric("Years in F1", 2025 - team_info.get('first_entry', 2025) if team_info.get('first_entry') else 'N/A')
+            active_year = get_active_season_year()
+            st.metric("Years in F1", active_year - team_info.get('first_entry', active_year) if team_info.get('first_entry') else 'N/A')
         
         st.divider()
         
-        # 2025 Season stats
-        st.subheader("2025 Season Performance")
+        # Active season stats
+        st.subheader(f"{get_active_season_label()} Season Performance")
         
         col1, col2, col3, col4, col5 = st.columns(5)
         
@@ -1237,14 +2712,292 @@ def render_teams_tab(df):
         show_plotly_chart(fig, use_container_width=True)
 
 
+def render_weekend_dashboard_tab() -> None:
+    st.header("Weekend Dashboard")
+    st.markdown("Interactive session intelligence dashboard using FastF1 (weather, tyre strategy, speeds, sectors, and control messages when available).")
+
+    races = get_season_race_choices()
+    if not races:
+        st.info("Race list is not available yet.")
+        return
+
+    s1, s2, s3 = st.columns([2, 1, 1])
+    with s1:
+        gp = st.selectbox("Select Grand Prix", races, key="weekend_dash_gp")
+    with s2:
+        sess = st.selectbox("Session", ["Race", "Qualifying", "Sprint", "Practice 1", "Practice 2", "Practice 3"], key="weekend_dash_session")
+    with s3:
+        load_clicked = st.button("Load Weekend Data", key="weekend_dash_reload", type="primary")
+
+    active_year = get_active_season_year()
+    load_sig = f"{active_year}|{gp}|{sess}"
+    if load_clicked:
+        st.session_state["weekend_dash_loaded_sig"] = load_sig
+
+    event_row = _find_schedule_event_row(active_year, gp)
+    if event_row is not None:
+        st.caption(f"Session clock displays user time in UTC{get_user_utc_offset()} with seconds.")
+        now = pd.Timestamp.now(tz="UTC")
+        sched_rows = []
+        for key in ["Session1", "Session2", "Session3", "Session4", "Session5"]:
+            date_key = f"{key}Date"
+            if key in event_row.index and date_key in event_row.index and pd.notna(event_row[date_key]):
+                dt_val = pd.to_datetime(event_row[date_key], errors="coerce", utc=True)
+                if pd.isna(dt_val):
+                    continue
+                status = "Upcoming"
+                if dt_val <= now <= dt_val + timedelta(hours=2.5):
+                    status = "Live"
+                elif now > dt_val + timedelta(hours=2.5):
+                    status = "Completed"
+                sched_rows.append(
+                    {
+                        "Session": str(event_row.get(key, key)),
+                        f"Start (UTC{get_user_utc_offset()})": format_user_time(dt_val, "%d %b %Y %H:%M:%S"),
+                        "Countdown": _countdown_text_precise(dt_val, now),
+                        "Status": status,
+                    }
+                )
+        if sched_rows:
+            st.dataframe(pd.DataFrame(sched_rows), hide_index=True, use_container_width=True)
+
+    if st.session_state.get("weekend_dash_loaded_sig") != load_sig:
+        st.info("Select a race/session and click `Load Weekend Data` to fetch the weekend dashboard.")
+        return
+
+    with st.spinner("Loading FastF1 session data..."):
+        session = get_fastf1_session_state_cached(
+            year=active_year,
+            race=gp,
+            session_type=sess,
+            load_telemetry=False,
+            cache_namespace="weekend_dash_fastf1",
+            force_reload=bool(load_clicked),
+        )
+
+    if session is None:
+        st.warning("Selected session data is not available yet. Calendar and countdown remain active.")
+        return
+
+    info = get_session_info(session)
+    laps_df = session.laps.copy() if hasattr(session, "laps") and session.laps is not None else pd.DataFrame()
+    results_df = get_race_results(session)
+    weather_df = session.weather_data.copy() if hasattr(session, "weather_data") and session.weather_data is not None else pd.DataFrame()
+    stints_df = get_tyre_stints(session)
+    top_speeds_df = get_top_speeds(session)
+    best_sectors_df = get_best_sectors(session)
+    pit_df = get_pit_stops(session)
+    track_status_df = get_track_status(session)
+    race_control_df = get_race_control_messages(session)
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Event", str(info.get("event_name", gp)))
+    m2.metric("Session", str(info.get("session_name", sess)))
+    m3.metric("Drivers", int(info.get("num_drivers", len(getattr(session, "drivers", []) or []))))
+    m4.metric("Laps Rows", len(laps_df) if isinstance(laps_df, pd.DataFrame) else 0)
+    m5.metric("Weather Rows", len(weather_df) if isinstance(weather_df, pd.DataFrame) else 0)
+
+    _render_data_availability_badges([
+        ("Results", isinstance(results_df, pd.DataFrame) and not results_df.empty, "FastF1 session results"),
+        ("Weather", isinstance(weather_df, pd.DataFrame) and not weather_df.empty, "session.weather_data"),
+        ("Tyre Stints", isinstance(stints_df, pd.DataFrame) and not stints_df.empty, "Computed from laps"),
+        ("Pit Stops", isinstance(pit_df, pd.DataFrame) and not pit_df.empty, "Pit in/out detection from laps"),
+        ("Top Speeds", isinstance(top_speeds_df, pd.DataFrame) and not top_speeds_df.empty, "Speed traps in lap data"),
+        ("Best Sectors", isinstance(best_sectors_df, pd.DataFrame) and not best_sectors_df.empty, "Best sector extraction"),
+        ("Track Status", isinstance(track_status_df, pd.DataFrame) and not track_status_df.empty, "Flags / SC / VSC events"),
+        ("Race Control", isinstance(race_control_df, pd.DataFrame) and not race_control_df.empty, "Race control messages feed"),
+    ])
+
+    dash_tabs = st.tabs(["Conditions", "Strategy", "Speed & Sectors", "Control", "Raw Tables"])
+
+    with dash_tabs[0]:
+        st.subheader("Weather & Session Conditions")
+        weather_summary = get_weather_summary(session)
+        w1, w2, w3, w4, w5 = st.columns(5)
+        w1.metric("Conditions", weather_summary.get("conditions", "N/A") if weather_summary else "N/A")
+        w2.metric("Air Temp", f"{weather_summary.get('air_temp_avg', 'N/A')}°C" if weather_summary.get("available") else "N/A")
+        w3.metric("Track Temp", f"{weather_summary.get('track_temp_avg', 'N/A')}°C" if weather_summary.get("available") else "N/A")
+        w4.metric("Humidity", f"{weather_summary.get('humidity_avg', 'N/A')}%" if weather_summary.get("available") else "N/A")
+        w5.metric("Rain", "Yes" if weather_summary.get("rainfall") else "No")
+
+        if isinstance(weather_df, pd.DataFrame) and not weather_df.empty:
+            wf = weather_df.copy()
+            wf["TimeLabel"] = wf["Time"].astype(str) if "Time" in wf.columns else np.arange(len(wf)).astype(str)
+            metric_options = [c for c in ["AirTemp", "TrackTemp", "Humidity", "WindSpeed"] if c in wf.columns]
+            selected_metrics = st.multiselect(
+                "Weather Metrics",
+                metric_options,
+                default=metric_options[: min(2, len(metric_options))],
+                key="weekend_dash_weather_metrics",
+            )
+            if selected_metrics:
+                fig = go.Figure()
+                for metric in selected_metrics:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=wf["TimeLabel"],
+                            y=pd.to_numeric(wf[metric], errors="coerce"),
+                            mode="lines",
+                            name=metric,
+                        )
+                    )
+                fig.update_layout(
+                    height=360,
+                    xaxis_title="Session Time",
+                    yaxis_title="Value",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="white"),
+                    margin=dict(l=10, r=10, t=20, b=40),
+                )
+                show_plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Weather feed is not available for this session yet.")
+
+    with dash_tabs[1]:
+        st.subheader("Tyre & Pit Strategy")
+        if isinstance(stints_df, pd.DataFrame) and not stints_df.empty and "Laps" in stints_df.columns:
+            fig = px.bar(
+                stints_df,
+                x="Laps",
+                y="Driver",
+                color="Compound" if "Compound" in stints_df.columns else None,
+                orientation="h",
+                hover_data=[c for c in ["Stint", "StartLap", "EndLap"] if c in stints_df.columns],
+                title="Tyre Stints by Driver",
+            )
+            fig.update_layout(
+                yaxis={"categoryorder": "total ascending"},
+                height=max(360, 24 * int(stints_df["Driver"].nunique())),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white"),
+                margin=dict(l=10, r=10, t=55, b=20),
+            )
+            show_plotly_chart(fig, use_container_width=True)
+            st.dataframe(stints_df.head(100), hide_index=True, use_container_width=True)
+        else:
+            st.info("Tyre stint data is not available for this session.")
+
+        st.markdown("#### Pit Stop Analysis")
+        if isinstance(pit_df, pd.DataFrame) and not pit_df.empty:
+            p = pit_df.copy()
+            duration_col = next((c for c in ["PitLaneTime", "PitStopTime", "Duration", "StopTime"] if c in p.columns), None)
+            if duration_col:
+                p[duration_col] = pd.to_numeric(p[duration_col], errors="coerce")
+                p = p.dropna(subset=[duration_col])
+                if not p.empty:
+                    fig = px.scatter(
+                        p,
+                        x="Lap" if "Lap" in p.columns else p.index,
+                        y=duration_col,
+                        color="Driver" if "Driver" in p.columns else None,
+                        title=f"Pit Stop Timing ({duration_col})",
+                    )
+                    fig.update_layout(
+                        height=320,
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="white"),
+                        margin=dict(l=10, r=10, t=55, b=20),
+                    )
+                    show_plotly_chart(fig, use_container_width=True)
+            st.dataframe(pit_df.head(50), hide_index=True, use_container_width=True)
+        else:
+            st.info("No pit stop events detected (or not available for this session type).")
+
+    with dash_tabs[2]:
+        st.subheader("Speed & Sectors")
+        left, right = st.columns(2)
+        with left:
+            if isinstance(top_speeds_df, pd.DataFrame) and not top_speeds_df.empty:
+                speed_cols = [c for c in top_speeds_df.columns if c.startswith("Max_")]
+                metric_col = st.selectbox("Speed Metric", speed_cols, key="weekend_dash_speed_metric") if speed_cols else None
+                if metric_col:
+                    fig = px.bar(
+                        top_speeds_df.sort_values(metric_col, ascending=False),
+                        x="Driver",
+                        y=metric_col,
+                        color=metric_col,
+                        title=f"Top Speeds ({metric_col})",
+                    )
+                    fig.update_layout(
+                        height=340,
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="white"),
+                        margin=dict(l=10, r=10, t=55, b=30),
+                        xaxis_title="",
+                    )
+                    show_plotly_chart(fig, use_container_width=True)
+                st.dataframe(top_speeds_df, hide_index=True, use_container_width=True)
+            else:
+                st.info("Speed trap data is not available.")
+        with right:
+            if isinstance(best_sectors_df, pd.DataFrame) and not best_sectors_df.empty:
+                heat_cols = [c for c in ["Best_Sector1", "Best_Sector2", "Best_Sector3", "FastestLap", "TheoreticalBest"] if c in best_sectors_df.columns]
+                if heat_cols:
+                    heat_df = best_sectors_df[["Driver"] + heat_cols].copy().set_index("Driver")
+                    fig = px.imshow(heat_df, aspect="auto", color_continuous_scale="Turbo", title="Best Sector / Lap Heatmap (s)")
+                    fig.update_layout(
+                        height=340,
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        font=dict(color="white"),
+                        margin=dict(l=10, r=10, t=55, b=20),
+                    )
+                    show_plotly_chart(fig, use_container_width=True)
+                st.dataframe(best_sectors_df, hide_index=True, use_container_width=True)
+            else:
+                st.info("Sector timing detail is not available.")
+
+    with dash_tabs[3]:
+        st.subheader("Track Status & Race Control")
+        c_left, c_right = st.columns(2)
+        with c_left:
+            st.markdown("**Track Status Events**")
+            if isinstance(track_status_df, pd.DataFrame) and not track_status_df.empty:
+                st.dataframe(track_status_df.tail(50), hide_index=True, use_container_width=True)
+            else:
+                st.info("No track status events in current feed.")
+        with c_right:
+            st.markdown("**Race Control Messages**")
+            if isinstance(race_control_df, pd.DataFrame) and not race_control_df.empty:
+                st.dataframe(race_control_df.tail(50), hide_index=True, use_container_width=True)
+            else:
+                st.info("No race control messages in current feed.")
+
+    with dash_tabs[4]:
+        st.subheader("Raw Session Tables")
+        choice = st.selectbox(
+            "Table",
+            ["Results", "Laps", "Weather", "Tyre Stints", "Pit Stops", "Top Speeds", "Best Sectors"],
+            key="weekend_dash_raw_choice",
+        )
+        mapping = {
+            "Results": results_df,
+            "Laps": laps_df,
+            "Weather": weather_df,
+            "Tyre Stints": stints_df,
+            "Pit Stops": pit_df,
+            "Top Speeds": top_speeds_df,
+            "Best Sectors": best_sectors_df,
+        }
+        out = mapping.get(choice, pd.DataFrame())
+        if isinstance(out, pd.DataFrame) and not out.empty:
+            st.dataframe(out.head(300), hide_index=True, use_container_width=True)
+        else:
+            st.info(f"{choice} table is not available for this session.")
+
+
 def render_race_detail_tab(df):
     """Race Weekend Details tab content."""
     st.header("Race Weekend Details")
     
     # Race selector - 2025 only
-    available_races = F1_2025_COMPLETED_RACES
+    available_races = get_season_race_choices()
     
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
         selected_race = st.selectbox(
             "Select Grand Prix", 
@@ -1257,14 +3010,48 @@ def render_race_detail_tab(df):
             ["Race", "Qualifying", "Sprint", "Practice 1", "Practice 2", "Practice 3"],
             key="race_detail_session_selector"
         )
+    with col3:
+        load_details_clicked = st.button("Load Session Details", key="race_detail_load_btn", type="primary")
     
     if selected_race:
         st.divider()
+        active_year = get_active_season_year()
+        detail_sig = f"{active_year}|{selected_race}|{session_type}"
+        if load_details_clicked:
+            st.session_state["race_detail_loaded_sig"] = detail_sig
+
+        if st.session_state.get("race_detail_loaded_sig") != detail_sig:
+            event_row = _find_schedule_event_row(active_year, selected_race)
+            if event_row is not None:
+                now = pd.Timestamp.now(tz="UTC")
+                sched_rows = []
+                for key in ["Session1", "Session2", "Session3", "Session4", "Session5"]:
+                    date_key = f"{key}Date"
+                    if key in event_row.index and date_key in event_row.index and pd.notna(event_row[date_key]):
+                        dt_val = pd.to_datetime(event_row[date_key], errors="coerce", utc=True)
+                        if pd.isna(dt_val):
+                            continue
+                        sched_rows.append({
+                            "Session": str(event_row.get(key, key)),
+                            f"Start (UTC{get_user_utc_offset()})": format_user_time(dt_val, "%d %b %Y %H:%M:%S"),
+                            "Countdown": _countdown_text_precise(dt_val, now),
+                        })
+                if sched_rows:
+                    with st.expander("Weekend Session Clock", expanded=False):
+                        st.dataframe(pd.DataFrame(sched_rows), hide_index=True, use_container_width=True)
+            st.info("Select a race/session and click `Load Session Details` to fetch weekend data.")
+            return
         
         # Load FastF1 data
         with st.spinner("Loading session data..."):
-            setup_fastf1_cache()
-            session = load_fastf1_session(2025, selected_race, session_type)
+            session = get_fastf1_session_state_cached(
+                year=active_year,
+                race=selected_race,
+                session_type=session_type,
+                load_telemetry=False,
+                cache_namespace="race_detail_fastf1",
+                force_reload=bool(load_details_clicked),
+            )
         
         if session is None:
             st.error(f"Could not load session data for {selected_race} - {session_type}")
@@ -1318,13 +3105,23 @@ def render_race_detail_tab(df):
             try:
                 results = session.results
                 if results is not None and not results.empty:
-                    display_results = results[['Position', 'Abbreviation', 'FullName', 'TeamName', 'Time', 'Status']].copy()
+                    preferred_cols = ['Position', 'Abbreviation', 'FullName', 'TeamName', 'Time', 'Status']
+                    available_cols = [c for c in preferred_cols if c in results.columns]
+                    display_results = results[available_cols].copy()
                     
                     # Apply global formatter
-                    display_results['Time'] = display_results['Time'].apply(format_f1_time)
+                    if 'Time' in display_results.columns:
+                        display_results['Time'] = display_results['Time'].apply(format_f1_time)
                     
-                    display_results.columns = ['Pos', 'Code', 'Driver', 'Team', 'Time', 'Status']
+                    display_results = display_results.rename(columns={
+                        'Position': 'Pos',
+                        'Abbreviation': 'Code',
+                        'FullName': 'Driver',
+                        'TeamName': 'Team'
+                    })
                     st.dataframe(display_results, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Results are not available for this session yet.")
             except Exception as e:
                 st.error(f"Could not load results: {e}")
         
@@ -1334,66 +3131,91 @@ def render_race_detail_tab(df):
             pit_stops = get_pit_stops(session)
             
             if pit_stops is not None and not pit_stops.empty:
-                # Summary metrics
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Total Pit Stops", len(pit_stops))
-                with col2:
-                    avg_time = pit_stops['PitTime'].mean()
-                    st.metric("Average Pit Time", f"{avg_time:.1f}s")
-                with col3:
-                    fastest = pit_stops['PitTime'].min()
-                    fastest_driver = pit_stops[pit_stops['PitTime'] == fastest]['Driver'].iloc[0]
-                    st.metric("Fastest Stop", f"{fastest:.1f}s ({fastest_driver})")
-                with col4:
-                    slowest = pit_stops['PitTime'].max()
-                    st.metric("Slowest Stop", f"{slowest:.1f}s")
-                
-                st.divider()
-                
-                # Pit stop chart - horizontal bar chart grouped by driver
-                st.markdown("**Pit Stop Times by Driver**")
-                
-                # Get unique drivers and sort by first stop lap
-                driver_order = pit_stops.groupby('Driver')['Lap'].min().sort_values().index.tolist()
-                
-                fig = go.Figure()
-                
-                for driver in driver_order[:15]:  # Top 15 drivers
-                    driver_stops = pit_stops[pit_stops['Driver'] == driver].sort_values('Stop')
-                    
-                    for _, stop in driver_stops.iterrows():
-                        fig.add_trace(go.Bar(
-                            y=[driver],
-                            x=[stop['PitTime']],
-                            orientation='h',
-                            name=f"Stop {int(stop['Stop'])}",
-                            text=f"L{int(stop['Lap'])}: {stop['PitTime']:.1f}s",
-                            textposition='auto',
-                            marker_color=['#E10600', '#FFD700', '#00FF00', '#3333FF'][int(stop['Stop']-1) % 4],
-                            showlegend=False,
-                            hovertemplate=f"{driver} - Stop {int(stop['Stop'])}<br>Lap: {int(stop['Lap'])}<br>Time: {stop['PitTime']:.1f}s<extra></extra>"
-                        ))
-                
-                fig.update_layout(
-                    title="Pit Stop Duration (seconds)",
-                    xaxis_title="Pit Time (seconds)",
-                    yaxis_title="Driver",
-                    height=max(400, len(driver_order) * 30),
-                    barmode='group',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    font=dict(color='white'),
-                    xaxis=dict(range=[0, max(pit_stops['PitTime'].max() * 1.1, 30)])
-                )
-                show_plotly_chart(fig, use_container_width=True)
-                
-                # Detailed pit stop table
-                st.markdown("**Detailed Pit Stop Data**")
-                display_pit = pit_stops.copy()
-                display_pit['PitTime'] = display_pit['PitTime'].apply(lambda x: f"{x:.1f}s")
-                display_pit = display_pit.rename(columns={'Stop': 'Stop #', 'PitTime': 'Duration'})
-                st.dataframe(display_pit, use_container_width=True, hide_index=True)
+                pit_df = pit_stops.copy()
+                duration_col = next((c for c in ['PitTime', 'PitLaneTime', 'PitStopTime', 'Duration', 'StopTime'] if c in pit_df.columns), None)
+                lap_col = 'Lap' if 'Lap' in pit_df.columns else None
+                stop_col = 'Stop' if 'Stop' in pit_df.columns else ('StopNumber' if 'StopNumber' in pit_df.columns else None)
+
+                if duration_col is None:
+                    st.info("Pit stop events found, but timing duration is not available for this session.")
+                    st.dataframe(pit_df, use_container_width=True, hide_index=True)
+                else:
+                    pit_df[duration_col] = pd.to_numeric(pit_df[duration_col], errors='coerce')
+                    pit_df = pit_df.dropna(subset=[duration_col])
+                    if pit_df.empty:
+                        st.info("Pit stop duration values are not available.")
+                    else:
+                        # Summary metrics.
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Total Pit Stops", len(pit_df))
+                        with col2:
+                            avg_time = pit_df[duration_col].mean()
+                            st.metric("Average Pit Time", f"{avg_time:.1f}s")
+                        with col3:
+                            fastest = pit_df[duration_col].min()
+                            fastest_driver = pit_df[pit_df[duration_col] == fastest]['Driver'].iloc[0] if 'Driver' in pit_df.columns else 'N/A'
+                            st.metric("Fastest Stop", f"{fastest:.1f}s ({fastest_driver})")
+                        with col4:
+                            slowest = pit_df[duration_col].max()
+                            st.metric("Slowest Stop", f"{slowest:.1f}s")
+                        
+                        st.divider()
+                        
+                        # Pit stop chart - horizontal bar chart grouped by driver.
+                        st.markdown("**Pit Stop Times by Driver**")
+                        
+                        # Get unique drivers and sort by first stop lap.
+                        if 'Driver' in pit_df.columns:
+                            if lap_col:
+                                driver_order = pit_df.groupby('Driver')[lap_col].min().sort_values().index.tolist()
+                            else:
+                                driver_order = pit_df['Driver'].dropna().astype(str).unique().tolist()
+                        else:
+                            driver_order = []
+                        
+                        fig = go.Figure()
+                        
+                        for driver in driver_order[:15]:  # Top 15 drivers.
+                            driver_stops = pit_df[pit_df['Driver'] == driver].copy()
+                            if stop_col and stop_col in driver_stops.columns:
+                                driver_stops = driver_stops.sort_values(stop_col)
+                            
+                            for _, stop in driver_stops.iterrows():
+                                stop_no = int(stop[stop_col]) if stop_col and pd.notna(stop.get(stop_col)) else 1
+                                lap_no = int(stop[lap_col]) if lap_col and pd.notna(stop.get(lap_col)) else 0
+                                pit_time = float(stop.get(duration_col))
+                                fig.add_trace(go.Bar(
+                                    y=[driver],
+                                    x=[pit_time],
+                                    orientation='h',
+                                    name=f"Stop {stop_no}",
+                                    text=f"L{lap_no}: {pit_time:.1f}s" if lap_no else f"{pit_time:.1f}s",
+                                    textposition='auto',
+                                    marker_color=['#E10600', '#FFD700', '#00FF00', '#3333FF'][(stop_no-1) % 4],
+                                    showlegend=False,
+                                    hovertemplate=f"{driver} - Stop {stop_no}<br>Lap: {lap_no if lap_no else 'N/A'}<br>Time: {pit_time:.1f}s<extra></extra>"
+                                ))
+                        
+                        fig.update_layout(
+                            title="Pit Stop Duration (seconds)",
+                            xaxis_title="Pit Time (seconds)",
+                            yaxis_title="Driver",
+                            height=max(400, len(driver_order) * 30),
+                            barmode='group',
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            font=dict(color='white'),
+                            xaxis=dict(range=[0, max(pit_df[duration_col].max() * 1.1, 30)])
+                        )
+                        show_plotly_chart(fig, use_container_width=True)
+                        
+                        # Detailed pit stop table.
+                        st.markdown("**Detailed Pit Stop Data**")
+                        display_pit = pit_df.copy()
+                        display_pit[duration_col] = display_pit[duration_col].apply(lambda x: f"{x:.1f}s")
+                        display_pit = display_pit.rename(columns={'Stop': 'Stop #', 'StopNumber': 'Stop #', duration_col: 'Duration'})
+                        st.dataframe(display_pit, use_container_width=True, hide_index=True)
             else:
                 st.info("Pit stop data not available")
         
@@ -1815,26 +3637,27 @@ def render_race_analysis_tab(df):
     st.markdown("Lap times, Pace comparison, Strategy analysis, Track Visualization") # Removed emojis
     
     if df is None or df.empty:
-        st.error("No data available")
-        return
+        st.caption("Local season table is empty for this mode. Session analysis can still run from FastF1 when available.")
     
     # Race selector
-    col1, col2 = st.columns([2, 1])
+    col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
-        # Use all races from config, not just completed ones
-        all_races = list(F1_2025_RACE_NAMES.keys())
+        # Use active season races (API-backed for 2026)
+        all_races = get_season_race_choices()
         selected_race = st.selectbox("Select Grand Prix", all_races, key="analysis_race")
     with col2:
         session_type = st.selectbox("Session", ["Race", "Qualifying", "Sprint"], key="analysis_session")
+    with col3:
+        load_analysis_clicked = st.button("Load Analysis Session", key="analysis_load_btn", type="primary")
     
     # Check if race has happened or is ongoing
     try:
-        schedule = fastf1.get_event_schedule(2025)
+        schedule = get_fastf1_schedule_cached(get_active_season_year())
         if schedule['EventDate'].dt.tz is None:
              schedule['EventDate'] = schedule['EventDate'].dt.tz_localize('UTC')
         
         # Find event
-        race_event = schedule[schedule['EventName'] == F1_2025_RACE_NAMES.get(selected_race, selected_race)]
+        race_event = schedule[schedule['EventName'] == selected_race]
         
         if not race_event.empty:
             event = race_event.iloc[0]
@@ -1859,6 +3682,14 @@ def render_race_analysis_tab(df):
     except Exception as e:
         pass # Ignore schedule check errors, let load fail naturally if needed
 
+    active_year = get_active_season_year()
+    analysis_sig = f"{active_year}|{selected_race}|{session_type}"
+    if load_analysis_clicked:
+        st.session_state["race_analysis_loaded_sig"] = analysis_sig
+    if st.session_state.get("race_analysis_loaded_sig") != analysis_sig:
+        st.info("Select a race/session and click `Load Analysis Session` to fetch analysis data.")
+        return
+
     # Analysis sub-tabs
     analysis_tabs = st.tabs([
         "Lap Analysis", "Pace Comparison", "Stint Analysis", 
@@ -1869,10 +3700,15 @@ def render_race_analysis_tab(df):
     
     # Load session
     with st.spinner("Loading session data..."):
-        setup_fastf1_cache()
-        # Use mapped name if available
-        race_lookup = F1_2025_RACE_NAMES.get(selected_race, selected_race)
-        session = load_fastf1_session(2025, race_lookup, session_type)
+        race_lookup = selected_race
+        session = get_fastf1_session_state_cached(
+            year=active_year,
+            race=race_lookup,
+            session_type=session_type,
+            load_telemetry=False,
+            cache_namespace="race_analysis_fastf1",
+            force_reload=bool(load_analysis_clicked),
+        )
     
     if session is None:
         st.warning(f"Data not available for {selected_race} - {session_type}. The session might not have started yet.")
@@ -2320,7 +4156,7 @@ def render_race_analysis_tab(df):
             
             # Show Track Dominance Map
             st.markdown("---")
-            st.subheader("🗺️ Circuit Dominance Map")
+            st.subheader("ðŸ—ºï¸ Circuit Dominance Map")
             st.markdown("Color-coded track map showing which team/driver is fastest in each mini-sector.")
             
             if st.button("Generate Dominance Map", type="primary", key="dom_btn"):
@@ -2413,7 +4249,7 @@ def render_race_analysis_tab(df):
 
             # NEW: Corner Analysis Matrix
             st.divider()
-            st.subheader("👑 Corner Mastery Matrix")
+            st.subheader("ðŸ‘‘ Corner Mastery Matrix")
             st.markdown("Average speed in **Low (<120)**, **Medium (120-230)**, and **High (>230)** speed zones.")
             
             if st.button("Generate Performance Matrix", key="corn_btn"):
@@ -2594,7 +4430,7 @@ def render_race_analysis_tab(df):
 
         # --- GOD MODE SIMULATION INTEGRATION ---
         st.divider()
-        st.markdown("### ⚡ Dynamic Strategy Simulation")
+        st.markdown("### âš¡ Dynamic Strategy Simulation")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -2626,9 +4462,9 @@ def render_race_analysis_tab(df):
             
             laps_catch = sim.catch_up_prediction(gap, chaser_tyre, leader_tyre, total_laps_sim - current_lap_sim)
             if laps_catch != -1:
-                st.info(f"🚀 Overtake in **{laps_catch} laps**")
+                st.info(f"ðŸš€ Overtake in **{laps_catch} laps**")
             else:
-                st.warning("⚠️ Overtake unlikely")
+                st.warning("âš ï¸ Overtake unlikely")
     
     # TAB 9: DRIVER SCORES
     with analysis_tabs[8]:
@@ -2660,7 +4496,7 @@ def render_race_analysis_tab(df):
                     st.divider()
                     
                     # --- NEW: RADAR CHART ---
-                    st.markdown("### 🕸️ Driver Capability Radar")
+                    st.markdown("### ðŸ•¸ï¸ Driver Capability Radar")
                     col_radar, col_table = st.columns([1, 1])
                     
                     with col_radar:
@@ -2844,7 +4680,7 @@ def render_prediction_tab(df, total_points_combined=None):
 
     # Get next race details from schedule
     try:
-        schedule = fastf1.get_event_schedule(2025)
+        schedule = get_fastf1_schedule_cached(get_active_season_year())
         if schedule['EventDate'].dt.tz is None:
              schedule['EventDate'] = schedule['EventDate'].dt.tz_localize('UTC')
         
@@ -2867,9 +4703,41 @@ def render_prediction_tab(df, total_points_combined=None):
     
     with pred_tabs[0]:
         st.subheader(f"Predicted Results - {race_name}")
+        priors_preview = load_preseason_prediction_priors()
+        has_preseason_priors = isinstance(priors_preview, pd.DataFrame) and not priors_preview.empty
+        is_2026_mode = get_active_season_year() == 2026
+        pred_state_key = f"prediction_results_df_{get_active_season_year()}"
+        pred_meta_key = f"prediction_results_meta_{get_active_season_year()}"
+        rendered_prediction_results = False
+
+        c1, c2 = st.columns([2, 2])
+        with c1:
+            preseason_weight = st.slider(
+                "Pre-season prior weight (scenario overlay)",
+                min_value=0.0,
+                max_value=0.35,
+                value=0.12 if (is_2026_mode and has_preseason_priors) else 0.0,
+                step=0.01,
+                key="pred_preseason_weight",
+                help="Mengatur bobot overlay skenario (Bahrain pace/mileage + Spain shakedown status). Tidak mengubah prediksi model dasar.",
+            )
+        with c2:
+            use_weighted_sort = st.checkbox(
+                "Sort by weighted scenario rank",
+                value=bool(is_2026_mode and has_preseason_priors and preseason_weight > 0),
+                key="pred_use_weighted_sort",
+                help="Jika aktif, tabel diurutkan berdasarkan skor gabungan model + prior pre-season (experimental).",
+            )
+        if has_preseason_priors:
+            st.caption(
+                "Pre-season priors tersedia dari Bahrain official tests (pace + mileage) dan Spain/Barcelona shakedown participation metadata. "
+                "Baseline model ranking tetap ditampilkan sebagai `Rank`; skenario overlay muncul sebagai `Scenario_Rank`."
+            )
+        else:
+            st.caption("Pre-season prior signal belum masuk untuk sesi ini. Prediksi tetap berjalan dengan baseline model.")
         
         if st.button("Generate Predictions", type="primary", key="gen_pred_btn"):
-            with st.spinner("Running Random Forest Regressor..."):
+            with st.spinner("Running Gradient Boosting model..."):
                 # Prepare input data
                 drivers = sorted(df['Driver'].unique().tolist())
                 driver_stats = calculate_driver_stats(df)
@@ -2882,7 +4750,7 @@ def render_prediction_tab(df, total_points_combined=None):
                 # Actually, prepare_features(train_mode=False) loads encoders.
                 
                 # Live Data Injection
-                real_grid = get_real_grid_positions(2025, race_name)
+                real_grid = get_real_grid_positions(get_active_season_year(), race_name)
                 using_live = False
                 
                 if real_grid:
@@ -2924,34 +4792,92 @@ def render_prediction_tab(df, total_points_combined=None):
                 pred_df = pd.DataFrame(pred_rows)
                 
                 try:
+                    include_preseason_for_inference = False
+                    schema_path = Path("models") / "feature_columns.json"
+                    if schema_path.exists():
+                        try:
+                            feature_schema = json.loads(schema_path.read_text(encoding="utf-8"))
+                            include_preseason_for_inference = any(
+                                str(col).startswith("preseason_") for col in (feature_schema or [])
+                            )
+                        except Exception:
+                            include_preseason_for_inference = False
+
                     # Transform features
-                    X_pred, _, _ = prepare_features(pred_df, train_mode=False)
+                    X_pred, _, _ = prepare_features(
+                        pred_df,
+                        train_mode=False,
+                        include_preseason_features=include_preseason_for_inference,
+                    )
                     
                     # Predict
                     y_pred = model.predict(X_pred)
                     
                     pred_df['Predicted_Position'] = y_pred
-                    pred_df = pred_df.sort_values('Predicted_Position')
+                    pred_df = pred_df.sort_values('Predicted_Position').reset_index(drop=True)
                     pred_df['Rank'] = range(1, len(pred_df) + 1)
-                    
-                    # Display
-                    st.dataframe(pred_df[['Rank', 'Driver', 'Team', 'Starting Grid', 'Predicted_Position']], 
-                                 use_container_width=True, hide_index=True)
-                    
-                    # Winner
-                    winner = pred_df.iloc[0]
-                    st.success(f"Predicted Winner: {winner['Driver']} ({winner['Team']})")
+                    pred_df = _augment_predictions_with_preseason_signals(
+                        pred_df,
+                        using_live_grid=using_live,
+                        preseason_weight=preseason_weight,
+                        use_weighted_sort=use_weighted_sort and preseason_weight > 0,
+                    )
+                    st.session_state[pred_state_key] = pred_df.copy()
+                    st.session_state[pred_meta_key] = {
+                        "race_name": race_name,
+                        "using_live": bool(using_live),
+                        "preseason_weight": float(preseason_weight),
+                        "use_weighted_sort": bool(use_weighted_sort and preseason_weight > 0),
+                    }
+                    _render_prediction_results_panel(
+                        pred_df,
+                        using_live=using_live,
+                        preseason_weight=float(preseason_weight),
+                        use_weighted_sort=bool(use_weighted_sort and preseason_weight > 0),
+                        race_name=race_name,
+                    )
+                    rendered_prediction_results = True
                     
                 except Exception as e:
                     st.error(f"Prediction failed: {e}")
                     st.caption("Ensure categorical encoders (Driver, Team, Track) are generated via training.")
 
+        if not rendered_prediction_results:
+            cached_pred_df = st.session_state.get(pred_state_key)
+            cached_meta = st.session_state.get(pred_meta_key, {})
+            if isinstance(cached_pred_df, pd.DataFrame) and not cached_pred_df.empty:
+                cached_race_name = str(cached_meta.get("race_name", race_name))
+                st.caption(
+                    f"Showing last generated predictions for `{cached_race_name}`. "
+                    "Generate again to refresh with current settings/live grid."
+                )
+                _render_prediction_results_panel(
+                    cached_pred_df.copy(),
+                    using_live=bool(cached_meta.get("using_live", False)),
+                    preseason_weight=float(cached_meta.get("preseason_weight", preseason_weight)),
+                    use_weighted_sort=bool(cached_meta.get("use_weighted_sort", False)),
+                    race_name=cached_race_name,
+                )
+
     with pred_tabs[1]:
         st.subheader("Prediction Factors")
         
         if hasattr(model, 'feature_importances_'):
-            # Hardcoded feature names based on features.py
-            feature_names = ['Starting Grid', 'Driver', 'Team', 'Track']
+            feature_names = None
+            if hasattr(model, 'feature_names_in_'):
+                try:
+                    feature_names = [str(x) for x in list(model.feature_names_in_)]
+                except Exception:
+                    feature_names = None
+            if not feature_names:
+                schema_path = Path("models") / "feature_columns.json"
+                if schema_path.exists():
+                    try:
+                        feature_names = json.loads(schema_path.read_text(encoding="utf-8"))
+                    except Exception:
+                        feature_names = None
+            if not feature_names:
+                feature_names = [f"Feature {i+1}" for i in range(len(model.feature_importances_))]
             
             if len(model.feature_importances_) == len(feature_names):
                 importances = pd.DataFrame({
@@ -2969,6 +4895,7 @@ def render_prediction_tab(df, total_points_combined=None):
                 * **Starting Grid:** Historical data shows qualifying performance is the strongest predictor.
                 * **Driver/Team:** Adjusts for car performance relative to the field.
                 * **Track:** Accounts for circuit-specific performance characteristics.
+                * **Pre-season Testing (2026 mode):** Bahrain test pace/mileage and Spain shakedown participation can be used as early-season priors.
                 """)
             else:
                 st.info("Feature importance details unavailable.")
@@ -2983,22 +4910,46 @@ def render_telemetry_tab(df):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        available_races = F1_2025_COMPLETED_RACES
+        available_races = get_season_race_choices()
+        if not available_races:
+            st.warning("No race schedule available for the selected season yet.")
+            return
         selected_race = st.selectbox("Select Grand Prix", available_races, key="telem_race")
     
     with col2:
         session_type = st.selectbox("Session", ["Race", "Qualifying", "Sprint"], key="telem_session")
     
     with col3:
-        drivers = df['Driver'].unique().tolist() if df is not None else []
-        selected_driver = st.selectbox("Select Driver", sorted(drivers), key="telem_driver")
+        if isinstance(df, pd.DataFrame) and not df.empty and 'Driver' in df.columns:
+            drivers = sorted(df['Driver'].dropna().astype(str).unique().tolist())
+        else:
+            drivers = sorted([d for d in DRIVER_PROFILES.keys() if isinstance(d, str) and d.strip()])
+        if not drivers:
+            st.warning("No driver list available yet for this season.")
+            return
+        selected_driver = st.selectbox("Select Driver", drivers, key="telem_driver")
+
+    active_year = get_active_season_year()
+    telem_sig = f"{active_year}|{selected_race}|{session_type}|{selected_driver}"
+    telem_load_clicked = st.button("Load Telemetry", type="primary", key="telem_load_btn")
+    if telem_load_clicked:
+        st.session_state["telemetry_loaded_sig"] = telem_sig
+
+    if st.session_state.get("telemetry_loaded_sig") != telem_sig:
+        st.info("Select race/session/driver and click `Load Telemetry` to fetch telemetry traces.")
+        return
+
+    st.divider()
     
-    if st.button("Load Telemetry", type="primary"):
-        st.divider()
-        
-        with st.spinner("Loading telemetry data..."):
-            setup_fastf1_cache()
-            session = load_fastf1_session(2025, selected_race, session_type)
+    with st.spinner("Loading telemetry data..."):
+        session = get_fastf1_session_state_cached(
+            year=active_year,
+            race=selected_race,
+            session_type=session_type,
+            load_telemetry=True,
+            cache_namespace="telemetry_fastf1",
+            force_reload=bool(telem_load_clicked),
+        )
         
         if session is None:
             st.error(f"Could not load session: {selected_race}")
@@ -3263,6 +5214,250 @@ def render_telemetry_tab(df):
             logger.error(f"Telemetry error: {e}", exc_info=True)
 
 
+def render_analysis_performance_lab_tab(df) -> None:
+    st.header("Performance Lab")
+    st.markdown("Interactive analysis dashboard for pace, finishing efficiency, and pre-season intelligence.")
+
+    priors_df = load_preseason_prediction_priors()
+    if df is None or df.empty:
+        st.info("Season race results are not loaded yet. Showing pre-season intelligence and 2026 rollout signals.")
+        c1, c2 = st.columns(2)
+        with c1:
+            if isinstance(priors_df, pd.DataFrame) and not priors_df.empty:
+                pri = priors_df.copy().sort_values("preseason_prior_score", ascending=False)
+                fig = px.bar(
+                    pri,
+                    x="preseason_prior_score",
+                    y="team_norm",
+                    orientation="h",
+                    color="preseason_prior_coverage",
+                    title="Pre-season Team Signal (ML priors)",
+                    color_continuous_scale="Tealgrn",
+                )
+                fig.update_layout(
+                    yaxis={"categoryorder": "total ascending"},
+                    height=360,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="white"),
+                    margin=dict(l=10, r=10, t=55, b=20),
+                )
+                show_plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Pre-season ML priors are not available.")
+        with c2:
+            updates_df = pd.DataFrame(OFFICIAL_2026_UPDATES)
+            if not updates_df.empty and "category" in updates_df.columns:
+                cat = updates_df["category"].value_counts().reset_index()
+                cat.columns = ["Category", "Updates"]
+                fig = px.pie(cat, names="Category", values="Updates", hole=0.45, title="2026 Official Update Categories")
+                fig.update_layout(
+                    height=360,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="white"),
+                    margin=dict(l=10, r=10, t=55, b=10),
+                )
+                show_plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Official updates list is loading.")
+        return
+
+    work_df = df.copy()
+    if "Position" not in work_df.columns:
+        st.warning("Position column is missing from the loaded season dataset.")
+        return
+
+    f1, f2, f3 = st.columns([1.2, 1.2, 2.2])
+    with f1:
+        teams = sorted([t for t in work_df["Team"].dropna().unique().tolist() if t]) if "Team" in work_df.columns else []
+        team_sel = st.selectbox("Team Filter", ["All Teams"] + teams, key="analysis_lab_team_filter")
+    with f2:
+        metric_mode = st.selectbox("Chart Focus", ["Grid vs Finish", "Points by Team", "Position Consistency"], key="analysis_lab_metric_mode")
+    with f3:
+        track_opts = [str(t) for t in work_df["Track"].dropna().unique().tolist()] if "Track" in work_df.columns else []
+        selected_tracks = st.multiselect("Track Filter", track_opts, default=track_opts, key="analysis_lab_track_filter")
+
+    if team_sel != "All Teams" and "Team" in work_df.columns:
+        work_df = work_df[work_df["Team"] == team_sel]
+    if selected_tracks and "Track" in work_df.columns:
+        work_df = work_df[work_df["Track"].astype(str).isin(selected_tracks)]
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Rows", len(work_df))
+    m2.metric("Drivers", work_df["Driver"].nunique() if "Driver" in work_df.columns else 0)
+    m3.metric("Teams", work_df["Team"].nunique() if "Team" in work_df.columns else 0)
+    avg_finish = pd.to_numeric(work_df["Position"], errors="coerce").mean() if len(work_df) else np.nan
+    m4.metric("Avg Finish", f"{avg_finish:.2f}" if pd.notna(avg_finish) else "N/A")
+
+    if metric_mode == "Grid vs Finish" and "Starting Grid" in work_df.columns:
+        fig = px.scatter(
+            work_df,
+            x="Starting Grid",
+            y="Position",
+            color="Team" if "Team" in work_df.columns else None,
+            hover_data=[c for c in ["Driver", "Track", "Points"] if c in work_df.columns],
+            title="Grid Position vs Finish Position",
+        )
+        fig.update_layout(
+            yaxis=dict(autorange="reversed"),
+            height=420,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            margin=dict(l=10, r=10, t=55, b=30),
+        )
+        show_plotly_chart(fig, use_container_width=True)
+    elif metric_mode == "Points by Team" and "Team" in work_df.columns and "Points" in work_df.columns:
+        pts = work_df.groupby("Team", dropna=False)["Points"].sum().reset_index().sort_values("Points", ascending=False)
+        fig = px.bar(pts, x="Team", y="Points", color="Team", title="Points by Team")
+        fig.update_layout(
+            height=420,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            showlegend=False,
+            margin=dict(l=10, r=10, t=55, b=40),
+            xaxis_title="",
+        )
+        show_plotly_chart(fig, use_container_width=True)
+    elif metric_mode == "Position Consistency" and "Driver" in work_df.columns:
+        fig = px.box(work_df, x="Driver", y="Position", color="Team" if "Team" in work_df.columns else None, title="Finishing Position Consistency")
+        fig.update_layout(
+            yaxis=dict(autorange="reversed"),
+            height=420,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            margin=dict(l=10, r=10, t=55, b=40),
+            xaxis_title="",
+        )
+        show_plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("The selected analysis view requires data columns that are not available for the current dataset.")
+
+    with st.expander("Filtered Analysis Table"):
+        st.dataframe(work_df.head(300), hide_index=True, use_container_width=True)
+
+
+def render_live_control_tab() -> None:
+    st.header("Live Control")
+    st.markdown("Countdown, session clock, and signal monitor in one control-room panel.")
+
+    active_year = get_active_season_year()
+    now_utc = pd.Timestamp.now(tz="UTC")
+    next_race = get_next_race_countdown_summary(active_year)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("System UTC", now_utc.strftime("%H:%M:%S"))
+    c2.metric("User Offset", f"UTC{get_user_utc_offset()}")
+    c3.metric("Active Season", str(active_year))
+    c4.metric("Next Race", _countdown_text_precise(next_race.get("race_time"), now_utc) if next_race.get("ok") else "N/A")
+
+    if next_race.get("ok"):
+        st.markdown(
+            f"""
+            <div style="border:1px solid rgba(255,255,255,0.08); border-radius:14px; padding:12px 14px; margin:6px 0 12px 0;
+                        background:linear-gradient(135deg, rgba(20,24,34,0.95), rgba(32,38,50,0.92));">
+                <div style="font-size:12px; color:#b8c2d4; text-transform:uppercase; letter-spacing:1px;">Live Countdown</div>
+                <div style="font-size:18px; font-weight:800; color:#f2f5fb;">{next_race.get('event')}</div>
+                <div style="font-size:13px; color:#c8d2e2;">{next_race.get('location')} | {format_user_time(next_race.get('race_time'), '%d %b %Y %H:%M:%S')}</div>
+                <div style="margin-top:8px; font-size:15px; color:#bff8f2; font-weight:700;">{_countdown_text_precise(next_race.get('race_time'), now_utc)} until lights out</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    next_event_row = _find_schedule_event_row(active_year, next_race.get("event")) if next_race.get("ok") else None
+    if next_event_row is not None:
+        rows = []
+        for key in ["Session1", "Session2", "Session3", "Session4", "Session5"]:
+            date_key = f"{key}Date"
+            if key in next_event_row.index and date_key in next_event_row.index and pd.notna(next_event_row[date_key]):
+                dtv = pd.to_datetime(next_event_row[date_key], errors="coerce", utc=True)
+                if pd.isna(dtv):
+                    continue
+                status = "Upcoming"
+                if dtv <= now_utc <= dtv + timedelta(hours=2.5):
+                    status = "Live"
+                elif now_utc > dtv + timedelta(hours=2.5):
+                    status = "Completed"
+                rows.append(
+                    {
+                        "Session": str(next_event_row.get(key, key)),
+                        f"Start (UTC{get_user_utc_offset()})": format_user_time(dtv, "%d %b %Y %H:%M:%S"),
+                        "Countdown": _countdown_text_precise(dtv, now_utc),
+                        "Status": status,
+                    }
+                )
+        if rows:
+            st.markdown("### Session Clock")
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    st.markdown("### Signal Monitor")
+    sm1, sm2 = st.columns([1, 3])
+    with sm1:
+        if st.button("Refresh Signals", key="live_control_refresh_signals"):
+            st.session_state["live_control_refresh_nonce"] = st.session_state.get("live_control_refresh_nonce", 0) + 1
+            st.rerun()
+    with sm2:
+        st.caption("Monitors data services and news feeds used by the dashboard (best coverage in 2026 mode).")
+
+    nonce = int(st.session_state.get("live_control_refresh_nonce", 0))
+    status_df = pd.DataFrame()
+    news_df = pd.DataFrame()
+    if active_year == 2026:
+        try:
+            api_snap = load_2026_api_snapshot(nonce)
+            status_df = api_snap.get("status", pd.DataFrame()) if isinstance(api_snap, dict) else pd.DataFrame()
+        except Exception as e:
+            st.warning(f"Signal monitor (data services) unavailable: {e}")
+        try:
+            news_snap = load_2026_news_snapshot(nonce)
+            news_df = news_snap.get("news", pd.DataFrame()) if isinstance(news_snap, dict) else pd.DataFrame()
+        except Exception as e:
+            st.warning(f"Signal monitor (news) unavailable: {e}")
+
+    n1, n2, n3, n4 = st.columns(4)
+    n1.metric("Sources Checked", len(status_df) if isinstance(status_df, pd.DataFrame) else 0)
+    n2.metric("Sources Ready", int(status_df["ok"].fillna(False).sum()) if isinstance(status_df, pd.DataFrame) and not status_df.empty else 0)
+    n3.metric("News Items", len(news_df) if isinstance(news_df, pd.DataFrame) else 0)
+    n4.metric("Refresh Counter", nonce)
+
+    if isinstance(status_df, pd.DataFrame) and not status_df.empty:
+        plot_df = status_df.copy()
+        if "source" not in plot_df.columns:
+            if "api" in plot_df.columns:
+                plot_df["source"] = plot_df["api"]
+            else:
+                plot_df["source"] = plot_df.index.astype(str)
+        plot_df["latency_ms_num"] = pd.to_numeric(plot_df.get("latency_ms"), errors="coerce")
+        plot_df["Status"] = np.where(plot_df["ok"].fillna(False), "Ready", "Pending")
+        fig = px.bar(
+            plot_df,
+            x="source",
+            y="latency_ms_num",
+            color="Status",
+            hover_data=[c for c in ["rows", "error"] if c in plot_df.columns],
+            title="Data Service Latency",
+            barmode="group",
+        )
+        fig.update_layout(
+            height=330,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="white"),
+            margin=dict(l=10, r=10, t=55, b=30),
+            xaxis_title="",
+            yaxis_title="Latency (ms)",
+        )
+        show_plotly_chart(fig, use_container_width=True)
+        with st.expander("Signal Monitor Table"):
+            st.dataframe(status_df, hide_index=True, use_container_width=True)
+    else:
+        st.info("Signal monitor will populate when 2026 data services are enabled and reachable.")
+
+
 def render_live_timing_tab():
     """Live Timing Session tab content."""
     st.header("Live Timing Session") # Removed emoji
@@ -3270,10 +5465,106 @@ def render_live_timing_tab():
     # Current time (UTC)
     now = pd.Timestamp.now(tz='UTC')
     st.markdown(f"**Current System Time (UTC):** {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    active_year = get_active_season_year()
+
+    # Completed seasons should show archive/final mode instead of waiting for live sessions.
+    if active_year < now.year:
+        st.info(f"{active_year} season is completed. Live mode is switched to archive summary.")
+        final_df = load_race_data(active_year)
+        if final_df is None or final_df.empty:
+            st.warning("Final season archive data is not available locally.")
+            return
+        race_only_df = final_df.copy()
+        if "SessionType" in race_only_df.columns:
+            race_only_df = race_only_df[race_only_df["SessionType"].astype(str).str.lower() != "sprint"].copy()
+        if race_only_df.empty:
+            race_only_df = final_df.copy()
+
+        total_points = race_only_df.groupby("Driver")["Points"].sum().sort_values(ascending=False).reset_index()
+        total_points.columns = ["Driver", "RacePoints"]
+        sprint_df = load_sprint_data(active_year)
+        if sprint_df is not None and not sprint_df.empty and {"Driver", "Points"}.issubset(sprint_df.columns):
+            sprint_pts = sprint_df.groupby("Driver")["Points"].sum().reset_index()
+            sprint_pts.columns = ["Driver", "SprintPoints"]
+            total_points = total_points.merge(sprint_pts, on="Driver", how="left")
+        else:
+            total_points["SprintPoints"] = 0
+        total_points["TotalPoints"] = total_points["RacePoints"].fillna(0) + total_points["SprintPoints"].fillna(0)
+        total_points = total_points.sort_values("TotalPoints", ascending=False).reset_index(drop=True)
+
+        team_map = race_only_df.groupby("Driver")["Team"].first().to_dict() if {"Driver", "Team"}.issubset(race_only_df.columns) else {}
+        total_points["Team"] = total_points["Driver"].map(team_map).fillna("")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Final Champion", total_points.iloc[0]["Driver"] if not total_points.empty else "N/A")
+        c2.metric("Points", int(total_points.iloc[0]["TotalPoints"]) if not total_points.empty else 0)
+        c3.metric("Races", int(race_only_df["Track"].nunique()) if "Track" in race_only_df.columns else 0)
+        c4.metric("Archive Mode", "Enabled")
+
+        tab_a, tab_b, tab_c = st.tabs(["Final Standings", "Winners Timeline", "Archive Notes"])
+        with tab_a:
+            max_drivers_display = max(5, min(20, len(total_points)))
+            default_drivers_display = min(10, max_drivers_display)
+            top_n = st.slider("Drivers to display", 5, max_drivers_display, default_drivers_display, key="live_archive_top_n")
+            show = total_points.head(top_n).copy()
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=show["TotalPoints"],
+                y=show["Driver"],
+                orientation="h",
+                marker_color=[TEAM_COLORS.get(team_map.get(d, ""), "#666666") for d in show["Driver"]],
+                text=show["TotalPoints"].astype(int),
+                textposition="outside"
+            ))
+            fig.update_layout(
+                height=max(350, top_n * 32),
+                yaxis={'categoryorder': 'total ascending'},
+                xaxis_title="Points",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white'),
+                margin=dict(l=10, r=80, t=20, b=30)
+            )
+            show_plotly_chart(fig, use_container_width=True)
+            st.dataframe(show[["Driver", "Team", "RacePoints", "SprintPoints", "TotalPoints"]], hide_index=True, use_container_width=True)
+        with tab_b:
+            if {"Track", "Driver", "Team", "Position"}.issubset(race_only_df.columns):
+                winners = race_only_df[pd.to_numeric(race_only_df["Position"], errors="coerce") == 1].copy()
+                if not winners.empty:
+                    race_order = race_only_df["Track"].dropna().astype(str).drop_duplicates().tolist()
+                    winners["Track"] = pd.Categorical(winners["Track"].astype(str), categories=race_order, ordered=True)
+                    winners = winners.sort_values("Track").reset_index(drop=True)
+                    winners["Round"] = winners.index + 1
+                    fig = px.scatter(
+                        winners,
+                        x="Round",
+                        y="Driver",
+                        color="Team",
+                        hover_data=["Track", "Points"],
+                        title=f"{active_year} Grand Prix Winners Timeline"
+                    )
+                    fig.update_layout(
+                        height=360,
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        font=dict(color='white'),
+                        margin=dict(l=10, r=10, t=55, b=20)
+                    )
+                    show_plotly_chart(fig, use_container_width=True)
+                    st.dataframe(winners[["Round", "Track", "Driver", "Team", "Points"]], hide_index=True, use_container_width=True)
+                else:
+                    st.info("Race winner archive is not available.")
+            else:
+                st.info("Required columns for winners timeline are missing.")
+        with tab_c:
+            st.markdown("- Use `Race Center` to load archived sessions (Race / Qualifying / Practice) from FastF1.")
+            st.markdown("- Use `Analysis` for predictions and performance comparisons on final season results.")
+            st.markdown("- Home and Season Stats now show final-season interactive summaries for completed years.")
+        return
     
     # Get schedule for 2025
     try:
-        schedule = fastf1.get_event_schedule(2025)
+        schedule = get_fastf1_schedule_cached(active_year)
         
         # Ensure schedule dates are timezone-aware UTC for comparison
         if schedule['EventDate'].dt.tz is None:
@@ -3287,6 +5578,7 @@ def render_live_timing_tab():
             next_event = upcoming.iloc[0]
             st.subheader(f"Target Event: {next_event['EventName']}")
             st.write(f"Location: {next_event['Location']}")
+            st.caption(f"Session times shown in UTC{get_user_utc_offset()}")
             
             # Display sessions
             sessions = ['Session1', 'Session2', 'Session3', 'Session4', 'Session5']
@@ -3318,7 +5610,7 @@ def render_live_timing_tab():
                         
                         schedule_data.append({
                             'Session': s_name, 
-                            'Time': s_date.strftime('%Y-%m-%d %H:%M') if pd.notna(s_date) else 'TBD',
+                            'Time': format_user_time(s_date, '%Y-%m-%d %H:%M') if pd.notna(s_date) else 'TBD',
                             'Status': status
                         })
             
@@ -3350,7 +5642,7 @@ def render_live_timing_tab():
             st.divider()
             st.markdown("### Live Data Connection")
             
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns([2, 1, 1])
             with col1:
                 default_idx = 0
                 if active_session_name:
@@ -3363,26 +5655,39 @@ def render_live_timing_tab():
                 auto_refresh = st.checkbox("Auto-refresh (Simulated)", value=False)
                 if auto_refresh:
                     st.caption("Page will refresh interaction to update data")
-                else:
-                    if st.button("Refresh Now"): # Removed emoji
-                        pass  # Just triggers rerun
-            
-            # Automatic connection if session is selected
+            with col3:
+                connect_clicked = st.button("Connect / Refresh", type="primary", key="live_timing_connect_btn")
+
+            conn_sig = f"{active_year}|{next_event['EventName']}|{session_sel}"
+            if connect_clicked:
+                st.session_state["live_timing_connection_sig"] = conn_sig
+            elif auto_refresh and st.session_state.get("live_timing_connection_sig") == conn_sig:
+                # keep current connection active during reruns
+                pass
+
+            if st.session_state.get("live_timing_connection_sig") != conn_sig:
+                st.info("Select a session and click `Connect / Refresh` to start the live feed.")
+                return
+
             if session_sel:
                 with st.spinner(f"Connecting to {next_event['EventName']} - {session_sel}..."):
                     try:
                         # Attempt to load
-                        setup_fastf1_cache()
-                        session = fastf1.get_session(2025, next_event['EventName'], session_sel)
-                        
-                        # For live sessions, we might get partial data
-                        # We suppress errors for live data fetch
+                        session = get_fastf1_session_state_cached(
+                            year=active_year,
+                            race=next_event['EventName'],
+                            session_type=session_sel,
+                            load_telemetry=False,
+                            cache_namespace="live_timing_fastf1",
+                            force_reload=bool(auto_refresh or connect_clicked),
+                        )
+                        if session is None:
+                            st.error("Could not connect to session feed.")
+                            return
                         try:
-                            session.load(telemetry=False, weather=True, messages=True)
+                            session.load(telemetry=False, laps=True, weather=True, messages=True)
                         except Exception as e:
-                            st.warning(f"Full load failed (expected if live): {e}")
-                            # Try minimal load
-                            pass
+                            st.warning(f"Full live refresh unavailable (expected for some sessions): {e}")
                         
                         st.success(f"Connected to {session.name}")
                         
@@ -3413,7 +5718,7 @@ def render_live_timing_tab():
                             valid_cols = [c for c in cols if c in session.results.columns]
                             st.dataframe(session.results[valid_cols], hide_index=True, use_container_width=True)
                         else:
-                            st.info("Waiting for timing data... (Results not yet available)")
+                            st.info("Waiting for timing feed. Results will appear as soon as session data is published.")
                         
                         # Latest Messages
                         st.subheader("Race Control Messages")
@@ -3427,7 +5732,7 @@ def render_live_timing_tab():
                         st.error(f"Connection failed: {e}")
                         st.info("Note: FastF1 requires the session to be started to fetch data.")
         else:
-            st.info("No upcoming events found for 2025 (or schedule API unavailable).")
+            st.info(f"No upcoming events found for {get_active_season_label()}. Calendar sync may still be updating.")
             
     except Exception as e:
         st.error(f"Error loading schedule: {e}")
@@ -3440,12 +5745,31 @@ def render_qualifying_tab():
     
     col1, col2 = st.columns(2)
     with col1:
-        q_race = st.selectbox("Select Race for Qualifying Analysis", F1_2025_COMPLETED_RACES, key="q_race")
-    
-    if st.button("Analyze Qualifying", type="primary"):
-        with st.spinner(f"Loading {q_race} Qualifying Data..."):
-            setup_fastf1_cache()
-            session = load_fastf1_session(2025, q_race, "Qualifying")
+        q_races = get_season_race_choices()
+        if not q_races:
+            st.warning("No race schedule available for the selected season yet.")
+            return
+        q_race = st.selectbox("Select Race for Qualifying Analysis", q_races, key="q_race")
+
+    q_year = get_active_season_year()
+    quali_sig = f"{q_year}|{q_race}|Qualifying"
+    analyze_quali_clicked = st.button("Analyze Qualifying", type="primary", key="analyze_quali_btn")
+    if analyze_quali_clicked:
+        st.session_state["qualifying_loaded_sig"] = quali_sig
+
+    if st.session_state.get("qualifying_loaded_sig") != quali_sig:
+        st.info("Select a race and click `Analyze Qualifying` to load qualifying visuals.")
+        return
+
+    with st.spinner(f"Loading {q_race} Qualifying Data..."):
+            session = get_fastf1_session_state_cached(
+                year=q_year,
+                race=q_race,
+                session_type="Qualifying",
+                load_telemetry=False,
+                cache_namespace="qualifying_fastf1",
+                force_reload=bool(analyze_quali_clicked),
+            )
             
             if session:
                 st.divider()
@@ -3542,17 +5866,37 @@ def render_official_plots_tab():
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        plot_race = st.selectbox("Select Race", F1_2025_COMPLETED_RACES, key="plot_race")
+        plot_races = get_season_race_choices()
+        if not plot_races:
+            st.warning("No race schedule available for the selected season yet.")
+            return
+        plot_race = st.selectbox("Select Race", plot_races, key="plot_race")
     with col2:
         plot_session = st.selectbox("Session Type", ["Race", "Qualifying"], key="plot_session")
     with col3:
         st.markdown("Driver specific plots:")
         plot_driver = st.text_input("Driver Code (e.g., VER, HAM)", value="VER", key="plot_driver")
         
-    if st.button("Generate Plots", type="primary"):
-        with st.spinner("Generating plots..."):
-            setup_fastf1_cache()
-            session = load_fastf1_session(2025, plot_race, plot_session)
+    plot_driver = plot_driver.strip().upper() or "VER"
+    plot_year = get_active_season_year()
+    plot_sig = f"{plot_year}|{plot_race}|{plot_session}|{plot_driver}"
+    generate_plots_clicked = st.button("Generate Plots", type="primary", key="generate_official_plots_btn")
+    if generate_plots_clicked:
+        st.session_state["official_plots_loaded_sig"] = plot_sig
+
+    if st.session_state.get("official_plots_loaded_sig") != plot_sig:
+        st.info("Select race/session/driver and click `Generate Plots` to render this dashboard.")
+        return
+
+    with st.spinner("Generating plots..."):
+            session = get_fastf1_session_state_cached(
+                year=plot_year,
+                race=plot_race,
+                session_type=plot_session,
+                load_telemetry=False,
+                cache_namespace="official_plots_fastf1",
+                force_reload=bool(generate_plots_clicked),
+            )
             if session:
                 st.subheader("Circuit with Corners")
                 fig1 = plot_circuit_with_corners(session)
@@ -3579,23 +5923,30 @@ def render_official_plots_tab():
 
 def main():
     """Main application entry point."""
+    if "sidebar_season_mode" not in st.session_state:
+        st.session_state["sidebar_season_mode"] = "2026"
+
     render_header()
     
+    active_year = get_active_season_year()
+
     # Load data
-    df = load_race_data()
+    df = load_race_data(active_year)
     
     # Calculate total points properly (race + sprint)
     total_points_combined = {}
     total_laps_all = 0
     total_all_points = 0
-    if df is not None:
+    if df is not None and not df.empty:
         data_dir = Path(__file__).parent.parent / 'data'
         try:
-            race_df = pd.read_csv(data_dir / 'Formula1_2025Season_RaceResults.csv')
-            sprint_df = pd.read_csv(data_dir / 'Formula1_2025Season_SprintResults.csv')
+            race_file = data_dir / f'Formula1_{active_year}Season_RaceResults.csv'
+            sprint_file = data_dir / f'Formula1_{active_year}Season_SprintResults.csv'
+            race_df = pd.read_csv(race_file)
+            sprint_df = pd.read_csv(sprint_file) if sprint_file.exists() else pd.DataFrame(columns=['Driver', 'Points'])
             
             race_points = race_df.groupby('Driver')['Points'].sum()
-            sprint_points = sprint_df.groupby('Driver')['Points'].sum()
+            sprint_points = sprint_df.groupby('Driver')['Points'].sum() if not sprint_df.empty else pd.Series(dtype=float)
             total_points_combined = race_points.add(sprint_points, fill_value=0).to_dict()
             total_laps_all = race_df['Laps'].sum()
             total_all_points = sum(total_points_combined.values())
@@ -3606,17 +5957,92 @@ def main():
     
     # Sidebar
     with st.sidebar:
+        active_year_sidebar = get_active_season_year()
+        badge_label = "2026 Live" if active_year_sidebar == 2026 else "2025"
+        badge_bg = "rgba(0,210,190,0.16)" if active_year_sidebar == 2026 else "rgba(245,185,66,0.16)"
+        badge_fg = "#bff8f2" if active_year_sidebar == 2026 else "#ffe5a8"
+        badge_border = "rgba(0,210,190,0.40)" if active_year_sidebar == 2026 else "rgba(245,185,66,0.40)"
         # Removed emoji from image source
         st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/F1.svg/512px-F1.svg.png", width=80) 
-        st.title("F1 2025")
+        st.markdown(
+            f"""
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:4px;">
+                <div style="font-size:1.35rem; font-weight:700;">F1 Lab</div>
+                <div style="padding:4px 10px; border:1px solid {badge_border}; background:{badge_bg}; border-radius:999px; font-size:0.75rem; font-weight:700; color:{badge_fg}; white-space:nowrap;">
+                    {badge_label}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
         st.markdown("---")
+
+        st.markdown("**Season Menu**")
+        _season_mode = st.radio(
+            "Season",
+            ["2025", "2026"],
+            key="sidebar_season_mode"
+        )
+
+        default_utc = st.session_state.get("user_utc_offset", "-05:00")
+        if default_utc not in UTC_OFFSET_OPTIONS:
+            default_utc = "-05:00"
+        st.selectbox(
+            "User UTC Offset",
+            UTC_OFFSET_OPTIONS,
+            index=UTC_OFFSET_OPTIONS.index(default_utc),
+            key="user_utc_offset",
+            help="Used to convert race, schedule, and news timestamps across the dashboard."
+        )
+
+        next_race_sidebar = get_next_race_countdown_summary(active_year_sidebar)
+        if next_race_sidebar.get("ok"):
+            race_week_badge = (
+                '<span style="padding:3px 8px; border-radius:999px; background:rgba(225,6,0,0.16); color:#ffd1ce; border:1px solid rgba(225,6,0,0.35); font-size:11px; font-weight:700;">RACE WEEK</span>'
+                if next_race_sidebar.get("is_race_week")
+                else '<span style="padding:3px 8px; border-radius:999px; background:rgba(0,210,190,0.16); color:#bff8f2; border:1px solid rgba(0,210,190,0.35); font-size:11px; font-weight:700;">COUNTDOWN</span>'
+            )
+            st.markdown(
+                f"""
+                <div style="margin:8px 0 10px 0; border:1px solid rgba(255,255,255,0.10); border-radius:12px; padding:10px 12px;
+                            background:linear-gradient(135deg, rgba(20,24,34,0.92), rgba(28,34,48,0.92));">
+                    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px;">
+                        <div style="font-size:12px; color:#b8c2d4; text-transform:uppercase; letter-spacing:1px;">Next Race Countdown</div>
+                        <div>{race_week_badge}</div>
+                    </div>
+                    <div style="font-weight:700; font-size:15px; color:#f2f5fb;">{next_race_sidebar.get('event','Next Race')}</div>
+                    <div style="font-size:12px; color:#b8c2d4; margin:2px 0 8px 0;">{next_race_sidebar.get('location','TBA')} | {format_user_time(next_race_sidebar.get('race_time'), '%d %b %Y %H:%M')}</div>
+                    <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px;">
+                        <div style="border:1px solid rgba(255,255,255,0.07); border-radius:8px; padding:6px 8px; text-align:center;">
+                            <div style="font-size:11px; color:#aeb8c8;">Days</div>
+                            <div style="font-size:16px; font-weight:800; color:#fff;">{int(next_race_sidebar.get('days', 0))}</div>
+                        </div>
+                        <div style="border:1px solid rgba(255,255,255,0.07); border-radius:8px; padding:6px 8px; text-align:center;">
+                            <div style="font-size:11px; color:#aeb8c8;">Hours</div>
+                            <div style="font-size:16px; font-weight:800; color:#fff;">{int(next_race_sidebar.get('hours', 0))}</div>
+                        </div>
+                        <div style="border:1px solid rgba(255,255,255,0.07); border-radius:8px; padding:6px 8px; text-align:center;">
+                            <div style="font-size:11px; color:#aeb8c8;">Minutes</div>
+                            <div style="font-size:16px; font-weight:800; color:#fff;">{int(next_race_sidebar.get('minutes', 0))}</div>
+                        </div>
+                        <div style="border:1px solid rgba(255,255,255,0.07); border-radius:8px; padding:6px 8px; text-align:center;">
+                            <div style="font-size:11px; color:#aeb8c8;">Seconds</div>
+                            <div style="font-size:16px; font-weight:800; color:#fff;">{int(next_race_sidebar.get('seconds', 0))}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:8px; font-size:11px; color:#aeb8c8;">Source: {next_race_sidebar.get('source', 'Calendar')}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
         
-        if df is not None:
-            st.markdown(f"**Races:** {len(F1_2025_COMPLETED_RACES)}/24")
+        st.markdown(f"**Season:** {active_year_sidebar}")
+        st.markdown(f"**Races:** {len(get_season_race_choices(active_year_sidebar))}/24")
+        if df is not None and not df.empty:
             st.markdown(f"**Total Points:** {int(total_all_points):,}")
-        
+        else:
+            st.markdown("**Total Points:** 0")
         st.markdown("---")
-        st.caption("Created by **Maxvy**")
 
     # Main Navigation (Grouped Tabs) - Removed emojis
     main_tabs = st.tabs([
@@ -3624,7 +6050,8 @@ def main():
         "Season Stats", 
         "Race Center",
         "Analysis",
-        "Live"
+        "Live",
+        "2026 Hub"
     ])
     
     # 1. Home
@@ -3634,7 +6061,7 @@ def main():
     # 2. Season Stats
     with main_tabs[1]:
         st.subheader("Season Statistics")
-        season_subtabs = st.tabs(["Overview", "Drivers", "Constructors"])
+        season_subtabs = st.tabs(["Overview", "Drivers", "Constructors", "Grid & Tech", "Regulations"])
         
         with season_subtabs[0]:
             render_overview_tab(df, total_points_combined)
@@ -3642,11 +6069,16 @@ def main():
             render_drivers_tab(df, total_points_combined)
         with season_subtabs[2]:
             render_teams_tab(df)
+        with season_subtabs[3]:
+            render_2026_grid_tech_tab()
+        with season_subtabs[4]:
+            render_2026_regulations_tab()
             
     # 3. Race Center
     with main_tabs[2]:
         st.subheader("Race Weekend Center")
         race_subtabs = st.tabs([
+            "Weekend Dashboard",
             "Weekend Details", 
             "Race Analysis", 
             "Qualifying", 
@@ -3657,58 +6089,96 @@ def main():
         ])
         
         with race_subtabs[0]:
-            render_race_detail_tab(df)
+            render_weekend_dashboard_tab()
         with race_subtabs[1]:
-            render_race_analysis_tab(df)
+            render_race_detail_tab(df)
         with race_subtabs[2]:
-            render_qualifying_tab()
+            render_race_analysis_tab(df)
         with race_subtabs[3]:
-            render_telemetry_tab(df)
+            render_qualifying_tab()
         with race_subtabs[4]:
-            render_race_replay_tab()
+            render_telemetry_tab(df)
         with race_subtabs[5]:
-            render_official_plots_tab()
+            render_race_replay_tab()
         with race_subtabs[6]:
+            render_official_plots_tab()
+        with race_subtabs[7]:
             # Data Export Logic Inline
             st.subheader("Data Export")
             st.markdown("Export session data to CSV for external analysis.")
             c1, c2 = st.columns(2)
             with c1:
-                ex_race = st.selectbox("Select Race", F1_2025_COMPLETED_RACES, key="export_race")
+                ex_race = st.selectbox("Select Race", get_season_race_choices(), key="export_race")
             with c2:
                 ex_session = st.selectbox("Session Type", ["Race", "Qualifying", "Sprint"], key="export_session")
                 
-            if st.button("Prepare Export", type="primary"):
-                with st.spinner("Processing data..."):
-                    setup_fastf1_cache()
-                    session = load_fastf1_session(2025, ex_race, ex_session)
-                    if session:
-                        exports = export_session_to_csv(session)
-                        cols = st.columns(3)
-                        if 'laps' in exports:
-                            cols[0].download_button("Download Laps", exports['laps'], f"{ex_race}_laps.csv", "text/csv")
-                        if 'results' in exports:
-                            cols[1].download_button("Download Results", exports['results'], f"{ex_race}_results.csv", "text/csv")
-                        if 'weather' in exports:
-                            cols[2].download_button("Download Weather", exports['weather'], f"{ex_race}_weather.csv", "text/csv")
-                        st.success("Data ready for download!")
-                    else:
-                        st.error("Could not load session.")
+            export_year = get_active_season_year()
+            export_sig = f"{export_year}|{ex_race}|{ex_session}"
+            prepare_export_clicked = st.button("Prepare Export", type="primary", key="prepare_export_btn")
+            if prepare_export_clicked:
+                st.session_state["export_ready_sig"] = export_sig
+
+            if st.session_state.get("export_ready_sig") != export_sig:
+                st.info("Select race/session and click `Prepare Export` to generate downloadable files.")
+            else:
+                export_cache = st.session_state.setdefault("export_payload_cache", {})
+                exports = export_cache.get(export_sig)
+
+                if exports is None or prepare_export_clicked:
+                    with st.spinner("Processing data..."):
+                        session = get_fastf1_session_state_cached(
+                            year=export_year,
+                            race=ex_race,
+                            session_type=ex_session,
+                            load_telemetry=False,
+                            cache_namespace="export_fastf1",
+                            force_reload=bool(prepare_export_clicked),
+                        )
+                        if session:
+                            exports = export_session_to_csv(session)
+                            export_cache[export_sig] = exports
+                        else:
+                            export_cache.pop(export_sig, None)
+                            exports = None
+                
+                if exports:
+                    cols = st.columns(3)
+                    if 'laps' in exports:
+                        cols[0].download_button("Download Laps", exports['laps'], f"{ex_race}_laps.csv", "text/csv")
+                    if 'results' in exports:
+                        cols[1].download_button("Download Results", exports['results'], f"{ex_race}_results.csv", "text/csv")
+                    if 'weather' in exports:
+                        cols[2].download_button("Download Weather", exports['weather'], f"{ex_race}_weather.csv", "text/csv")
+                    st.success("Data ready for download!")
+                else:
+                    st.error("Could not load session.")
 
     # 4. Analysis
     with main_tabs[3]:
         st.subheader("Advanced Analysis")
         # removed God Mode separate tab link, moved content to Strategy Tools
-        analysis_subtabs = st.tabs(["Teammate Battle", "Race Predictions"])
+        analysis_subtabs = st.tabs(["Teammate Battle", "Race Predictions", "Performance Lab"])
         
         with analysis_subtabs[0]:
             render_teammate_battle_tab(df)
         with analysis_subtabs[1]:
             render_prediction_tab(df, total_points_combined)
+        with analysis_subtabs[2]:
+            render_analysis_performance_lab_tab(df)
             
     # 5. Live
     with main_tabs[4]:
-        render_live_timing_tab()
+        live_subtabs = st.tabs(["Live Timing", "Live Control"])
+        with live_subtabs[0]:
+            render_live_timing_tab()
+        with live_subtabs[1]:
+            render_live_control_tab()
+
+    # 6. 2026 Hub
+    with main_tabs[5]:
+        render_f1_2026_updates_tab()
+
+    maybe_run_countdown_autorefresh()
 
 
 if __name__ == "__main__":
@@ -3718,3 +6188,4 @@ if __name__ == "__main__":
         import traceback
         st.error(f"Critical Error: {e}")
         st.code(traceback.format_exc())
+
