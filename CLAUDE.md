@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Real-time Formula 1 analytics dashboard supporting **multi-season** (2025, 2026).
+Real-time Formula 1 analytics dashboard for the **2025 season**.
 Built with Streamlit, FastF1 API, and Plotly.
 
 ```
@@ -15,27 +15,18 @@ streamlit run src/f1.py      # Main multi-page app
 src/
   f1.py                     # Entry point: page config, sidebar, st.navigation()
   shared.py                 # Shared utilities (data loading, cache, helpers)
-  season_config.py          # Dynamic calendar/driver/team via FastF1 API + fallbacks
-  config.py                 # Static data: teams, drivers, profiles (2025+2026)
+  season_config.py          # Dynamic calendar via FastF1 API + fallbacks
+  config.py                 # Static data: teams, drivers, profiles (2025)
   loader.py                 # CSV loading + cleaning
   analysis.py               # Stats aggregation
   model.py                  # Race strategy simulator
   fastf1_extended.py        # FastF1 data extraction (weather, pits, sectors, etc.)
   advanced_viz.py           # Plotly telemetry comparison
-  race_replay_data.py       # Replay frame generation
-  race_replay_viz.py        # Animated replay (Plotly)
-  arcade_replay_window.py   # Desktop 60fps replay (Arcade)
   assets/
     style.css               # Global CSS (glassmorphism dark theme)
   pages/
     1_Home.py               # Home dashboard
-    2_Standings.py          # Championship standings
-    3_Drivers.py            # Driver profiles and stats
-    4_Constructors.py       # Constructor analysis
-    5_Race_Weekend.py       # Race weekend details (8 tabs)
-    6_Analysis.py           # Race analysis center (12 tabs)
-    7_Telemetry.py          # Live telemetry monitor
-    8_Replay.py             # Race replay (web + desktop)
+    6_Analysis.py           # Race analysis center
 ```
 
 ## Multi-Season Support
@@ -44,9 +35,13 @@ src/
 - **Calendar**: `season_config.get_completed_races(year)` -- fetches live from FastF1, cached in-memory
 - **CSV naming**: `Formula1_{year}Season_RaceResults.csv` -- year injected dynamically
 - **FastF1 sessions**: Always pass `st.session_state.selected_year` as first arg
-- **Fallback**: `config.py` + `season_config.py` have hardcoded 2025/2026 data when FastF1 API is unavailable
+- **Fallback**: `config.py` + `season_config.py` have hardcoded 2025 data when FastF1 API is unavailable
 
-### Adding a new season (e.g. 2027)
+### Adding a new season (e.g. 2026)
+1. Place CSV files in `data/Formula1_2026Season_*.csv`
+2. Add fallback calendar to `season_config.py`
+3. Add teams/drivers to `config.py` (`F1_2026_TEAMS`, `DRIVER_PROFILES`, `DRIVER_DETAILS`)
+4. Update `max_supported_year` in `config.py`
 1. Place CSV files in `data/Formula1_2027Season_*.csv`
 2. Add fallback calendar to `season_config.py`
 3. Add teams/drivers to `config.py` (`F1_2027_TEAMS`, `DRIVER_PROFILES`, `DRIVER_DETAILS`)
