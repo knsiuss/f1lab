@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 fastf1_extended.py
-~~~~~~~~~~~~~~~~~~
 Extended FastF1 data extraction utilities.
 
 :copyright: (c) 2025 F1 Analytics
@@ -21,12 +20,10 @@ logger = logging.getLogger(__name__)
 # Cache setup
 CACHE_DIR = Path(__file__).parent.parent / 'cache'
 CACHE_DIR.mkdir(exist_ok=True)
+# Note: f1.py may override this with FASTF1_CONFIG.cache_dir if run via dashboard
 fastf1.Cache.enable_cache(str(CACHE_DIR))
 
-
-# ============================================================
 # SESSION INFORMATION
-# ============================================================
 
 def get_session_info(session: Any) -> Dict[str, Any]:
     """
@@ -109,7 +106,6 @@ def get_session_info(session: Any) -> Dict[str, Any]:
         logger.error(f"Error getting session info: {e}")
         return {}
 
-
 def get_session_schedule(session: Any) -> Dict[str, Any]:
     """
     Get session schedule with all session times.
@@ -144,10 +140,7 @@ def get_session_schedule(session: Any) -> Dict[str, Any]:
         logger.error(f"Error getting session schedule: {e}")
         return {}
 
-
-# ============================================================
 # WEATHER DATA
-# ============================================================
 
 def get_weather_data(session: Any) -> pd.DataFrame:
     """
@@ -170,7 +163,6 @@ def get_weather_data(session: Any) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Error getting weather data: {e}")
         return pd.DataFrame()
-
 
 def get_weather_summary(session: Any) -> Dict[str, Any]:
     """
@@ -223,10 +215,7 @@ def get_weather_summary(session: Any) -> Dict[str, Any]:
         logger.error(f"Error getting weather summary: {e}")
         return {'available': False}
 
-
-# ============================================================
 # TYRE STRATEGY
-# ============================================================
 
 def get_tyre_stints(session: Any, driver: Optional[str] = None) -> pd.DataFrame:
     """
@@ -296,7 +285,6 @@ def get_tyre_stints(session: Any, driver: Optional[str] = None) -> pd.DataFrame:
         logger.error(f"Error getting tyre stints: {e}")
         return pd.DataFrame()
 
-
 def get_tyre_degradation(session: Any, driver: str) -> Dict[str, Any]:
     """
     Calculate tyre degradation for a driver.
@@ -347,10 +335,7 @@ def get_tyre_degradation(session: Any, driver: str) -> Dict[str, Any]:
         logger.error(f"Error calculating tyre degradation: {e}")
         return {}
 
-
-# ============================================================
 # PIT STOPS
-# ============================================================
 
 def get_pit_stops(session: Any) -> pd.DataFrame:
     """
@@ -432,10 +417,7 @@ def get_pit_stops(session: Any) -> pd.DataFrame:
         logger.error(f"Error getting pit stops: {e}")
         return pd.DataFrame()
 
-
-# ============================================================
 # SECTOR TIMES
-# ============================================================
 
 def get_sector_times(session: Any, driver: Optional[str] = None) -> pd.DataFrame:
     """
@@ -506,7 +488,6 @@ def get_sector_times(session: Any, driver: Optional[str] = None) -> pd.DataFrame
         logger.error(f"Error getting sector times: {e}")
         return pd.DataFrame()
 
-
 def get_best_sectors(session: Any) -> pd.DataFrame:
     """
     Get best sector times for each driver.
@@ -557,10 +538,7 @@ def get_best_sectors(session: Any) -> pd.DataFrame:
         logger.error(f"Error getting best sectors: {e}")
         return pd.DataFrame()
 
-
-# ============================================================
 # SPEED TRAPS
-# ============================================================
 
 def get_speed_data(session: Any) -> pd.DataFrame:
     """
@@ -590,7 +568,6 @@ def get_speed_data(session: Any) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Error getting speed data: {e}")
         return pd.DataFrame()
-
 
 def get_top_speeds(session: Any) -> pd.DataFrame:
     """
@@ -634,10 +611,7 @@ def get_top_speeds(session: Any) -> pd.DataFrame:
         logger.error(f"Error getting top speeds: {e}")
         return pd.DataFrame()
 
-
-# ============================================================
 # TRACK STATUS
-# ============================================================
 
 def get_track_status(session: Any) -> pd.DataFrame:
     """
@@ -671,7 +645,6 @@ def get_track_status(session: Any) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Error getting track status: {e}")
         return pd.DataFrame()
-
 
 def get_flag_events(session: Any) -> List[Dict]:
     """
@@ -715,10 +688,7 @@ def get_flag_events(session: Any) -> List[Dict]:
         logger.error(f"Error getting flag events: {e}")
         return []
 
-
-# ============================================================
 # CAR DATA (Advanced Telemetry)
-# ============================================================
 
 def get_car_data(session: Any, driver: str, lap: Optional[int] = None) -> pd.DataFrame:
     """
@@ -764,7 +734,6 @@ def get_car_data(session: Any, driver: str, lap: Optional[int] = None) -> pd.Dat
         logger.error(f"Error getting car data for {driver}: {e}")
         return pd.DataFrame()
 
-
 def get_telemetry_comparison(
     session: Any, 
     driver1: str, 
@@ -799,10 +768,7 @@ def get_telemetry_comparison(
         logger.error(f"Error comparing telemetry: {e}")
         return {}
 
-
-# ============================================================
 # POSITION DATA
-# ============================================================
 
 def get_position_data(session: Any) -> pd.DataFrame:
     """
@@ -828,7 +794,6 @@ def get_position_data(session: Any) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Error getting position data: {e}")
         return pd.DataFrame()
-
 
 def get_position_changes(session: Any) -> pd.DataFrame:
     """
@@ -880,7 +845,6 @@ def get_position_changes(session: Any) -> pd.DataFrame:
         logger.error(f"Error getting position changes: {e}")
         return pd.DataFrame()
 
-
 def get_gaps_to_leader(session: Any) -> pd.DataFrame:
     """
     Calculate gaps to leader per lap.
@@ -923,10 +887,7 @@ def get_gaps_to_leader(session: Any) -> pd.DataFrame:
         logger.error(f"Error calculating gaps: {e}")
         return pd.DataFrame()
 
-
-# ============================================================
 # RACE RESULTS
-# ============================================================
 
 def get_race_results(session: Any) -> pd.DataFrame:
     """
@@ -957,8 +918,6 @@ def get_race_results(session: Any) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Error getting race results: {e}")
         return pd.DataFrame()
-
-
 
 def get_circuit_layout_info(session: Any) -> Dict[str, Any]:
     """
@@ -993,20 +952,32 @@ def get_circuit_layout_info(session: Any) -> Dict[str, Any]:
         logger.error(f"Error getting circuit info: {e}")
         return {}
 
-
-# ============================================================
 # UTILITY FUNCTIONS
-# ============================================================
 
 def format_lap_time(seconds: float) -> str:
     """Format seconds to lap time string (M:SS.mmm)."""
     if pd.isna(seconds):
         return "-"
-    
+
     minutes = int(seconds // 60)
     remaining = seconds % 60
     return f"{minutes}:{remaining:06.3f}"
 
+def format_f1_time(td: pd.Timedelta) -> str:
+    """Formats a pandas Timedelta into an F1-style time string (M:SS.mmm or H:MM:SS.mmm)."""
+    if pd.isna(td):
+        return "N/A"
+
+    total_seconds = td.total_seconds()
+
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = total_seconds % 60
+
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{seconds:06.3f}"
+    else:
+        return f"{minutes:d}:{seconds:06.3f}"
 
 def get_compound_color(compound: str) -> str:
     """Get color for tyre compound."""
@@ -1019,7 +990,6 @@ def get_compound_color(compound: str) -> str:
         'UNKNOWN': '#808080',
     }
     return colors.get(compound.upper(), '#808080')
-
 
 def get_driver_team(session: Any, driver: str) -> str:
     """Get team name for a driver."""
@@ -1043,7 +1013,6 @@ def get_driver_team(session: Any, driver: str) -> str:
         
     except:
         return "Unknown"
-
 
 def export_session_to_csv(session: Any) -> Dict[str, str]:
     """
@@ -1078,10 +1047,7 @@ def export_session_to_csv(session: Any) -> Dict[str, str]:
         logger.error(f"Error exporting session data: {e}")
         return {}
 
-
-# ============================================================
 # RACE CONTROL & EVENTS
-# ============================================================
 
 def get_race_control_messages(session: Any) -> pd.DataFrame:
     """
@@ -1116,7 +1082,6 @@ def get_race_control_messages(session: Any) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Error getting race control messages: {e}")
         return pd.DataFrame()
-
 
 def get_detailed_pit_analysis(session: Any) -> pd.DataFrame:
     """

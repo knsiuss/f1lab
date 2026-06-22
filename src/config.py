@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 config.py
-~~~~~~~~~
 Application constants and configuration.
 
 :copyright: (c) 2025 F1 Analytics
@@ -14,29 +13,24 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 
-
-# -----------------------------------------------------------------------------
 # Path Configuration
-# -----------------------------------------------------------------------------
 
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
 
 # Data directories
 DATA_DIR = PROJECT_ROOT / 'data'
-MODELS_DIR = PROJECT_ROOT / 'models'
 CACHE_DIR = PROJECT_ROOT / 'cache'
 NOTEBOOKS_DIR = PROJECT_ROOT / 'notebooks'
 LOGS_DIR = PROJECT_ROOT / 'logs'
 
-# Create directories if they don't exist
-for directory in [DATA_DIR, MODELS_DIR, CACHE_DIR, LOGS_DIR]:
-    directory.mkdir(exist_ok=True)
 
+def _ensure_dirs():
+    """Create data/cache/logs directories if they don't exist."""
+    for directory in [DATA_DIR, CACHE_DIR, LOGS_DIR]:
+        directory.mkdir(exist_ok=True)
 
-# ============================================================
 # DATA FILE PATHS
-# ============================================================
 
 @dataclass
 class DataFiles:
@@ -46,34 +40,9 @@ class DataFiles:
     sprint_results: Path = DATA_DIR / 'Formula1_2025Season_SprintResults.csv'
     sprint_qualifying: Path = DATA_DIR / 'Formula1_2025Season_SprintQualifyingResults.csv'
 
-
 DATA_FILES = DataFiles()
 
-
-# ============================================================
-# MODEL CONFIGURATION
-# ============================================================
-
-@dataclass
-class ModelConfig:
-    """Machine learning model configuration."""
-    model_path: Path = MODELS_DIR / 'f1_model.pkl'
-    driver_encoder_path: Path = MODELS_DIR / 'Driver_encoder.pkl'
-    team_encoder_path: Path = MODELS_DIR / 'Team_encoder.pkl'
-    track_encoder_path: Path = MODELS_DIR / 'Track_encoder.pkl'
-    
-    # Training parameters
-    test_size: float = 0.2
-    random_state: int = 42
-    n_estimators: int = 100
-
-
-MODEL_CONFIG = ModelConfig()
-
-
-# ============================================================
 # FASTF1 CONFIGURATION
-# ============================================================
 
 @dataclass
 class FastF1Config:
@@ -92,13 +61,9 @@ class FastF1Config:
         """Get list of supported historical seasons."""
         return list(range(self.min_supported_year, self.max_supported_year + 1))
 
-
 FASTF1_CONFIG = FastF1Config()
 
-
-# ============================================================
 # F1 2025 SEASON DATA
-# ============================================================
 
 # Official 2025 F1 Calendar
 F1_2025_CALENDAR: List[Dict] = [
@@ -135,33 +100,6 @@ F1_2025_RACE_NAMES: Dict[str, str] = {r['name']: r['name'] for r in F1_2025_CALE
 F1_2025_COMPLETED_RACES: List[str] = [r['name'] for r in F1_2025_CALENDAR]
 
 # F1 Points System
-POINTS_RACE: Dict[int, int] = {
-    1: 25, 2: 18, 3: 15, 4: 12, 5: 10,
-    6: 8, 7: 6, 8: 4, 9: 2, 10: 1
-}
-
-POINTS_SPRINT: Dict[int, int] = {
-    1: 8, 2: 7, 3: 6, 4: 5, 5: 4,
-    6: 3, 7: 2, 8: 1
-}
-
-POINTS_FASTEST_LAP: int = 1
-
-# 2025 F1 Teams with Official Colors (Updated to 2025 Specifications)
-F1_2025_TEAMS: List[Dict] = [
-    {'name': 'McLaren Mercedes', 'short': 'McLaren', 'color': '#FF8700'},
-    {'name': 'Red Bull Racing Honda RBPT', 'short': 'Red Bull', 'color': '#1E41FF'},
-    {'name': 'Ferrari', 'short': 'Ferrari', 'color': '#DC0000'},
-    {'name': 'Mercedes', 'short': 'Mercedes', 'color': '#00D2BE'},
-    {'name': 'Aston Martin Aramco Mercedes', 'short': 'Aston Martin', 'color': '#006F62'},
-    {'name': 'Alpine Renault', 'short': 'Alpine', 'color': '#0090FF'},
-    {'name': 'Williams Mercedes', 'short': 'Williams', 'color': '#005AFF'},
-    {'name': 'Racing Bulls Honda RBPT', 'short': 'Racing Bulls', 'color': '#F6E500'},  # Yellow 2025
-    {'name': 'Kick Sauber Ferrari', 'short': 'Kick Sauber', 'color': '#00E701'},  # Neon Green Stake 2025
-    {'name': 'Haas Ferrari', 'short': 'Haas', 'color': '#E6002B'},
-]
-
-# Team Colors Dictionary - All possible team name variations (2025 Official)
 TEAM_COLORS: Dict[str, str] = {
     # Main team names - 2025 Official Colors
     'Mercedes': '#00D2BE',
@@ -201,55 +139,7 @@ TEAM_COLORS: Dict[str, str] = {
     'Haas Ferrari': '#E6002B',
 }
 
-
-def get_team_color(team_name: str) -> str:
-    """
-    Get the official color for a team with error handling.
-    
-    Args:
-        team_name: Team name (any variation)
-        
-    Returns:
-        Hex color code string (2025 official color or default gray)
-        
-    Raises:
-        None - Always returns a valid color
-    """
-    # Setup logger if not already exists
-    if 'logger' not in globals():
-        global logger
-        logger = logging.getLogger(__name__)
-        
-    try:
-        # Validate input
-        if not team_name or not isinstance(team_name, str):
-            logger.warning(f"Invalid team name provided: {team_name}")
-            return '#808080'
-        
-        # Direct match (case-insensitive)
-        team_name_stripped = team_name.strip()
-        for key, color in TEAM_COLORS.items():
-            if key.lower() == team_name_stripped.lower():
-                return color
-        
-        # Partial match
-        for key, color in TEAM_COLORS.items():
-            if key.lower() in team_name_stripped.lower() or team_name_stripped.lower() in key.lower():
-                logger.debug(f"Partial match: '{team_name}' -> '{key}' ({color})")
-                return color
-        
-        # No match found
-        logger.warning(f"No color found for team: '{team_name}'. Using default gray.")
-        return '#808080'
-        
-    except Exception as e:
-        logger.error(f"Error getting team color for '{team_name}': {e}")
-        return '#808080'
-
-
-# ============================================================
 # DRIVER PROFILES (2025 F1 Season)
-# ============================================================
 
 # Driver Profile Dictionary with Biographies
 DRIVER_PROFILES: Dict[str, Dict] = {
@@ -555,218 +445,7 @@ DRIVER_DETAILS: Dict[str, Dict] = {
     }
 }
 
-# ============================================================
-# TEAM PROFILES (2025 F1 Season)
-# ============================================================
-
-TEAM_PROFILE: Dict[str, Dict] = {
-    "Red Bull Racing": {
-        "full_name": "Oracle Red Bull Racing",
-        "base": "Milton Keynes, UK",
-        "founded": 2005,
-        "team_principal": "Christian Horner",
-        "technical_director": "Pierre Waché",
-        "engine": "Honda RBPT",
-        "championships": 6,
-        "constructor_titles": [2010, 2011, 2012, 2013, 2022, 2023],
-        "wins": 120,
-        "poles": 100,
-        "podiums": 280,
-        "fastest_laps": 95,
-        "website": "https://www.redbullracing.com",
-        "twitter": "@reaboracing",
-        "instagram": "@redbullracing",
-        "color": "#1E41FF",
-        "logo_url": "https://media.formula1.com/content/dam/fom-website/teams/2024/red-bull-racing.png",
-        "bio": "Founded in 2005 after Dietrich Mateschitz purchased Jaguar Racing. Became a dominant force with Sebastian Vettel (4 titles) and Max Verstappen (4 titles). Known for aggressive development and strategic excellence."
-    },
-    "Ferrari": {
-        "full_name": "Scuderia Ferrari HP",
-        "base": "Maranello, Italy",
-        "founded": 1950,
-        "team_principal": "Frédéric Vasseur",
-        "technical_director": "Enrico Cardile",
-        "engine": "Ferrari",
-        "championships": 16,
-        "constructor_titles": [1961, 1964, 1975, 1976, 1977, 1979, 1982, 1983, 1999, 2000, 2001, 2002, 2003, 2004, 2007, 2008],
-        "wins": 245,
-        "poles": 248,
-        "podiums": 810,
-        "fastest_laps": 260,
-        "website": "https://www.ferrari.com/formula1",
-        "twitter": "@ScuderiaFerrari",
-        "instagram": "@scuderiaferrari",
-        "color": "#DC0000",
-        "logo_url": "https://media.formula1.com/content/dam/fom-website/teams/2024/ferrari.png",
-        "bio": "The most successful team in F1 history. Founded by Enzo Ferrari. Legendary drivers include Schumacher, Lauda, Prost, and Vettel. The only team to compete in every F1 season since 1950."
-    },
-    "Mercedes": {
-        "full_name": "Mercedes-AMG Petronas F1 Team",
-        "base": "Brackley, UK",
-        "founded": 2010,
-        "team_principal": "Toto Wolff",
-        "technical_director": "James Allison",
-        "engine": "Mercedes",
-        "championships": 8,
-        "constructor_titles": [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021],
-        "wins": 125,
-        "poles": 140,
-        "podiums": 290,
-        "fastest_laps": 98,
-        "website": "https://www.mercedesamgf1.com",
-        "twitter": "@MercedesAMGF1",
-        "instagram": "@mercedesamgf1",
-        "color": "#00D2BE",
-        "logo_url": "https://media.formula1.com/content/dam/fom-website/teams/2024/mercedes.png",
-        "bio": "Dominant team of the turbo-hybrid era with 8 consecutive constructor titles (2014-2021). Lewis Hamilton won 6 of his 7 titles with Mercedes. Known for engineering excellence and reliability."
-    },
-    "McLaren": {
-        "full_name": "McLaren Formula 1 Team",
-        "base": "Woking, UK",
-        "founded": 1966,
-        "team_principal": "Andrea Stella",
-        "technical_director": "Peter Prodromou",
-        "engine": "Mercedes",
-        "championships": 8,
-        "constructor_titles": [1974, 1984, 1985, 1988, 1989, 1990, 1991, 1998],
-        "wins": 183,
-        "poles": 157,
-        "podiums": 508,
-        "fastest_laps": 162,
-        "website": "https://www.mclaren.com/racing",
-        "twitter": "@McLarenF1",
-        "instagram": "@mclaren",
-        "color": "#FF8700",
-        "logo_url": "https://media.formula1.com/content/dam/fom-website/teams/2024/mclaren.png",
-        "bio": "Founded by Bruce McLaren. One of the most successful teams with legends like Senna, Prost, Häkkinen, and Hamilton. Currently resurgent with Norris and Piastri. Known for papaya orange livery."
-    },
-    "Aston Martin": {
-        "full_name": "Aston Martin Aramco F1 Team",
-        "base": "Silverstone, UK",
-        "founded": 2021,
-        "team_principal": "Mike Krack",
-        "technical_director": "Dan Fallows",
-        "engine": "Mercedes",
-        "championships": 0,
-        "constructor_titles": [],
-        "wins": 1,
-        "poles": 1,
-        "podiums": 10,
-        "fastest_laps": 2,
-        "website": "https://www.astonmartinf1.com",
-        "twitter": "@AstonMartinF1",
-        "instagram": "@astonmartinf1",
-        "color": "#006F62",
-        "logo_url": "https://media.formula1.com/content/dam/fom-website/teams/2024/aston-martin.png",
-        "bio": "Rebranded from Racing Point (formerly Force India) in 2021. Led by Fernando Alonso. Building new state-of-the-art factory at Silverstone. Aiming for championship success."
-    },
-    "Alpine": {
-        "full_name": "BWT Alpine F1 Team",
-        "base": "Enstone, UK & Viry-Châtillon, France",
-        "founded": 2021,
-        "team_principal": "Oliver Oakes",
-        "technical_director": "David Sanchez",
-        "engine": "Renault",
-        "championships": 2,
-        "constructor_titles": [2005, 2006],
-        "wins": 21,
-        "poles": 20,
-        "podiums": 100,
-        "fastest_laps": 15,
-        "website": "https://www.alpinecars.com/f1",
-        "twitter": "@AlpineF1Team",
-        "instagram": "@alpinef1team",
-        "color": "#0090FF",
-        "logo_url": "https://media.formula1.com/content/dam/fom-website/teams/2024/alpine.png",
-        "bio": "Factory Renault team rebranded as Alpine in 2021. History includes Benetton era titles with Schumacher and Renault titles with Alonso. French manufacturer building for future success."
-    },
-    "Williams": {
-        "full_name": "Williams Racing",
-        "base": "Grove, UK",
-        "founded": 1977,
-        "team_principal": "James Vowles",
-        "technical_director": "Pat Fry",
-        "engine": "Mercedes",
-        "championships": 9,
-        "constructor_titles": [1980, 1981, 1986, 1987, 1992, 1993, 1994, 1996, 1997],
-        "wins": 114,
-        "poles": 128,
-        "podiums": 313,
-        "fastest_laps": 133,
-        "website": "https://www.williamsf1.com",
-        "twitter": "@WilliamsRacing",
-        "instagram": "@williamsracing",
-        "color": "#005AFF",
-        "logo_url": "https://media.formula1.com/content/dam/fom-website/teams/2024/williams.png",
-        "bio": "Founded by Sir Frank Williams. Historic team with 9 constructors' titles. Champions include Piquet, Mansell, Prost, Hill, and Villeneuve. Currently rebuilding under Dorilton Capital ownership."
-    },
-    "Racing Bulls": {
-        "full_name": "Visa Cash App RB F1 Team",
-        "base": "Faenza, Italy",
-        "founded": 2006,
-        "team_principal": "Laurent Mekies",
-        "technical_director": "Jody Egginton",
-        "engine": "Honda RBPT",
-        "championships": 0,
-        "constructor_titles": [],
-        "wins": 2,
-        "poles": 1,
-        "podiums": 3,
-        "fastest_laps": 2,
-        "website": "https://www.visacashapprb.com",
-        "twitter": "@visacashapprb",
-        "instagram": "@visacashapprb",
-        "color": "#F6E500",
-        "logo_url": "https://media.formula1.com/content/dam/fom-website/teams/2024/rb.png",
-        "bio": "Red Bull's sister team, formerly Toro Rosso/AlphaTauri. Development ground for Red Bull talent including Verstappen, Vettel, and Ricciardo. Won at Monza 2008 and 2020."
-    },
-    "Haas": {
-        "full_name": "MoneyGram Haas F1 Team",
-        "base": "Kannapolis, USA & Banbury, UK",
-        "founded": 2016,
-        "team_principal": "Ayao Komatsu",
-        "technical_director": "Simone Resta",
-        "engine": "Ferrari",
-        "championships": 0,
-        "constructor_titles": [],
-        "wins": 0,
-        "poles": 1,
-        "podiums": 0,
-        "fastest_laps": 2,
-        "website": "https://www.haasf1team.com",
-        "twitter": "@HaasF1Team",
-        "instagram": "@haasf1team",
-        "color": "#E6002B",
-        "logo_url": "https://media.formula1.com/content/dam/fom-website/teams/2024/haas.png",
-        "bio": "American team founded by Gene Haas. First American F1 team since 1986. Partnered with Ferrari for power units and components. Notable for strong debut season in 2016."
-    },
-    "Kick Sauber": {
-        "full_name": "Stake F1 Team Kick Sauber",
-        "base": "Hinwil, Switzerland",
-        "founded": 1993,
-        "team_principal": "Mattia Binotto",
-        "technical_director": "James Key",
-        "engine": "Ferrari",
-        "championships": 0,
-        "constructor_titles": [],
-        "wins": 1,
-        "poles": 1,
-        "podiums": 28,
-        "fastest_laps": 5,
-        "website": "https://www.sauber-group.com",
-        "twitter": "@stakaborace",
-        "instagram": "@stakef1team",
-        "color": "#00E701",
-        "logo_url": "https://media.formula1.com/content/dam/fom-website/teams/2024/kick-sauber.png",
-        "bio": "Swiss team with rich history. Previously ran as BMW Sauber (2006-2009). Will become Audi factory team from 2026. Notable alumni include Räikkönen, Massa, and Vettel."
-    }
-}
-
-
-# ============================================================
 # LOGGING CONFIGURATION
-# ============================================================
-
 
 def setup_logging(
     level: int = logging.INFO,
@@ -810,14 +489,10 @@ def setup_logging(
     
     return logger
 
-
 # Default logger
 logger = setup_logging()
 
-
-# ============================================================
 # STREAMLIT CONFIGURATION
-# ============================================================
 
 @dataclass
 class StreamlitConfig:
@@ -829,67 +504,9 @@ class StreamlitConfig:
     theme_background_color: str = "#0E1117"
     cache_ttl: int = 3600  # 1 hour
 
-
 STREAMLIT_CONFIG = StreamlitConfig()
 
-
-# ============================================================
-# VISUALIZATION SETTINGS
-# ============================================================
-
-@dataclass
-class VisualizationConfig:
-    """Visualization configuration."""
-    plotly_template: str = "plotly_dark"
-    matplotlib_style: str = "seaborn-v0_8-darkgrid"
-    default_colorscale: str = "RdYlGn_r"
-    chart_height: int = 500
-    chart_width: int = 800
-
-
-VIZ_CONFIG = VisualizationConfig()
-
-
-# ============================================================
-# EXPORT CONFIGURATION
-# ============================================================
-
-def get_config() -> Dict:
-    """
-    Get all configuration as a dictionary.
-    
-    Returns:
-        Dictionary containing all configuration settings
-    """
-    return {
-        'project_root': str(PROJECT_ROOT),
-        'data_dir': str(DATA_DIR),
-        'models_dir': str(MODELS_DIR),
-        'cache_dir': str(CACHE_DIR),
-        'data_files': {
-            'race': str(DATA_FILES.race_results),
-            'qualifying': str(DATA_FILES.qualifying_results),
-            'sprint': str(DATA_FILES.sprint_results),
-            'sprint_qualifying': str(DATA_FILES.sprint_qualifying),
-        },
-        'model_config': {
-            'test_size': MODEL_CONFIG.test_size,
-            'random_state': MODEL_CONFIG.random_state,
-            'n_estimators': MODEL_CONFIG.n_estimators,
-        },
-        'fastf1_config': {
-            'default_year': FASTF1_CONFIG.default_year,
-            'retry_attempts': FASTF1_CONFIG.retry_attempts,
-        },
-        'points_race': POINTS_RACE,
-        'points_sprint': POINTS_SPRINT,
-    }
-
-
-
-# ============================================================
 # DRIVER DATA MERGE
-# ============================================================
 
 # Merge detailed stats into main profiles
 for driver, details in DRIVER_DETAILS.items():
@@ -909,15 +526,12 @@ SOCIAL_MEDIA_CONFIG = {
     'instagram': {'icon': 'instagram', 'url_prefix': 'https://instagram.com/'}
 }
 
-
 if __name__ == '__main__':
     # Print configuration summary
     print("F1 Visualization Configuration")
     print("=" * 50)
     print(f"Project Root: {PROJECT_ROOT}")
     print(f"Data Directory: {DATA_DIR}")
-    print(f"Models Directory: {MODELS_DIR}")
     print(f"Cache Directory: {CACHE_DIR}")
     print(f"2025 Calendar: {len(F1_2025_CALENDAR)} races")
-    print(f"Teams: {len(F1_2025_TEAMS)}")
     print("\nConfig loaded successfully!")

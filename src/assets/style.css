@@ -1,0 +1,154 @@
+/* Import modern fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@400;700&display=swap');
+
+/* Global Font Override */
+html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', sans-serif !important;
+}
+
+/* Hide Streamlit elements carefully */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden !important;}
+[data-testid="stHeader"] {display: none !important;}
+
+/* Hide specific deploy button */
+.stDeployButton {display: none !important;}
+[data-testid="stAppDeployButton"] {display: none !important;}
+[data-testid="stStatusWidget"] {display: none !important;}
+
+/* Hide floating action buttons */
+[data-testid="stChatActionButtonIcon"] {display: none !important;}
+div[data-testid="stBottomBlockContainer"] {display: none !important;}
+
+/* Custom styling with Glassmorphism */
+.main-header {
+    font-size: 2.5rem;
+    font-weight: 800;
+    color: #E10600;
+    text-align: center;
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.sub-header {
+    font-size: 1.2rem;
+    color: #888;
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+/* Glassmorphism Metric Card */
+.metric-card {
+    background: rgba(22, 33, 62, 0.4);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 12px;
+    padding: 20px;
+    color: white;
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.metric-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 40px 0 rgba(225, 6, 0, 0.2);
+    border-color: rgba(225, 6, 0, 0.3);
+}
+
+.driver-card {
+    background: rgba(21, 21, 30, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 15px;
+    padding: 20px;
+    margin: 10px 0;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 4px 16px 0 rgba(0, 0, 0, 0.2);
+}
+.driver-photo {
+    border-radius: 50%;
+    border: 3px solid #E10600;
+    box-shadow: 0 0 15px rgba(225, 6, 0, 0.3);
+}
+.stat-box {
+    background: rgba(31, 31, 46, 0.8);
+    border-radius: 8px;
+    padding: 10px;
+    margin: 5px;
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.weather-box {
+    background: linear-gradient(135deg, rgba(15, 52, 96, 0.8) 0%, rgba(22, 83, 126, 0.8) 100%);
+    backdrop-filter: blur(10px);
+    border-radius: 10px;
+    padding: 15px;
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.pit-stop-row {
+    background: rgba(26, 26, 46, 0.7);
+    border-radius: 5px;
+    padding: 10px;
+    margin: 5px 0;
+}
+.gauge-container {
+    text-align: center;
+    padding: 10px;
+}
+.telemetry-panel {
+    background: rgba(10, 10, 15, 0.8);
+    backdrop-filter: blur(5px);
+    border-radius: 10px;
+    padding: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* KPI Cards */
+.kpi-card {
+    background: rgba(22, 33, 62, 0.45);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 18px 12px;
+    text-align: center;
+    transition: transform 0.25s ease, border-color 0.25s ease;
+}
+.kpi-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(225, 6, 0, 0.35);
+}
+.kpi-value {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #E10600;
+    line-height: 1.1;
+}
+.kpi-label {
+    font-size: 0.78rem;
+    color: #888;
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Battle Cards */
+.battle-card {
+    background: rgba(20, 20, 35, 0.5);
+    border: 2px solid;
+    border-radius: 14px;
+    padding: 22px 12px;
+    text-align: center;
+    transition: transform 0.2s ease;
+}
+.battle-card:hover {
+    transform: scale(1.03);
+}

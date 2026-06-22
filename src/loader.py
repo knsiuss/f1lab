@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 loader.py
-~~~~~~~~~
 CSV data loading and preprocessing.
 
 :copyright: (c) 2025 F1 Analytics
@@ -15,7 +14,6 @@ from typing import Optional
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
 
 def load_data(file_path: str) -> Optional[pd.DataFrame]:
     """Load race data from CSV. Returns None on failure."""
@@ -53,7 +51,6 @@ def load_data(file_path: str) -> Optional[pd.DataFrame]:
     except Exception as e:
         logger.exception(f"Unexpected error loading data from {file_path}: {e}")
         return None
-
 
 def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize column types and create derived fields."""
@@ -104,7 +101,6 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
         logger.exception(f"Error cleaning data: {e}")
         raise
 
-
 def load_combined_data(data_dir: str) -> Optional[pd.DataFrame]:
     """
     Load and combine Race and Sprint results.
@@ -138,4 +134,3 @@ def load_combined_data(data_dir: str) -> Optional[pd.DataFrame]:
     except Exception as e:
         logger.error(f"Error loading combined data: {e}")
         return None
-

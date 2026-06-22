@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 advanced_viz.py
-~~~~~~~~~~~~~~~
 Telemetry comparison and track visualizations.
 
 :copyright: (c) 2025 F1 Analytics
@@ -168,7 +167,15 @@ def plot_telemetry_comparison(session, driver1, driver2, lap_number=None):
             hovermode="x unified",
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white')
+            font=dict(color='white'),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                bgcolor="rgba(0,0,0,0.5)"
+            )
         )
         
         fig.update_yaxes(title_text="km/h", row=1, col=1)
@@ -182,64 +189,6 @@ def plot_telemetry_comparison(session, driver1, driver2, lap_number=None):
         
     except Exception as e:
         logger.error(f"Error plotting telemetry: {e}")
-        return None
-
-def plot_track_3d(session, driver=None):
-    """
-    3D visualization of the track using telemetry position data.
-    Color-coded by speed.
-    """
-    try:
-        laps = session.laps
-        if driver:
-            lap = laps.pick_driver(driver).pick_fastest()
-        else:
-            lap = laps.pick_fastest()
-            
-        if lap.empty:
-            return None
-            
-        tel = lap.get_telemetry()
-        x = tel['X']
-        y = tel['Y']
-        z = tel['Z']
-        speed = tel['Speed']
-        
-        # Create 3D scatter plot
-        fig = go.Figure(data=[go.Scatter3d(
-            x=x, y=y, z=z,
-            mode='lines',
-            line=dict(
-                color=speed,
-                colorscale='Viridis',
-                width=5,
-                colorbar=dict(title="Speed (km/h)")
-            ),
-            hovertext=[f"Speed: {s:.0f} km/h<br>Elev: {e:.1f}m" for s, e in zip(speed, z)],
-            hoverinfo="text"
-        )])
-        
-        fig.update_layout(
-            title=f"3D Track Map - {session.event.EventName}",
-            scene=dict(
-                xaxis=dict(visible=False),
-                yaxis=dict(visible=False),
-                zaxis=dict(visible=True, title="Elevation"),
-                bgcolor='rgba(0,0,0,0)',
-                camera=dict(
-                    eye=dict(x=1.5, y=1.5, z=0.5)
-                )
-            ),
-            height=700,
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white'),
-            margin=dict(l=0, r=0, t=30, b=0)
-        )
-        
-        return fig
-        
-    except Exception as e:
-        logger.error(f"Error plotting 3D track: {e}")
         return None
 
 def plot_gear_shift_trace(session, driver=None):
@@ -300,75 +249,6 @@ def plot_gear_shift_trace(session, driver=None):
         return fig
     except Exception as e:
         logger.error(f"Error plotting gear shifts: {e}")
-        return None
-
-def plot_corner_performance(session):
-    """
-    Analyze cornering performance by binning speed into Low/Med/High buckets.
-    """
-    try:
-        laps = session.laps
-        drivers = laps['Driver'].unique()
-        
-        # Prepare data containers
-        corner_stats = []
-        
-        for driver in drivers:
-            lap = laps.pick_driver(driver).pick_fastest()
-            if lap is not None and not lap.empty:
-                try:
-                    tel = lap.get_car_data().add_distance()
-                    
-                    # Define buckets
-                    # Low: < 120 km/h
-                    # Med: 120 - 230 km/h
-                    # High: > 230 km/h
-                    
-                    low = tel[tel['Speed'] < 120]['Speed'].mean()
-                    med = tel[(tel['Speed'] >= 120) & (tel['Speed'] <= 230)]['Speed'].mean()
-                    high = tel[tel['Speed'] > 230]['Speed'].mean()
-                    
-                    corner_stats.append({
-                        'Driver': driver,
-                        'Slow Corners': low if not np.isnan(low) else 0,
-                        'Medium Corners': med if not np.isnan(med) else 0,
-                        'High Speed': high if not np.isnan(high) else 0
-                    })
-                except:
-                    continue
-                    
-        if not corner_stats:
-            return None
-            
-        df_stats = pd.DataFrame(corner_stats).set_index('Driver')
-        
-        # Normalize for heatmap (0-100 relative to field)
-        # Or just plot raw speed heat
-        
-        fig = go.Figure(data=go.Heatmap(
-            z=df_stats.values,
-            x=df_stats.columns,
-            y=df_stats.index,
-            colorscale='Viridis',
-            text=np.round(df_stats.values, 1),
-            texttemplate="%{text}",
-            colorbar=dict(title="Avg Speed (km/h)")
-        ))
-        
-        fig.update_layout(
-            title="Cornering Mastery Matrix (Avg Speed by Zone)",
-            title_x=0.5,
-            height=max(400, len(drivers)*30),
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white'),
-            xaxis=dict(side='top')
-        )
-        
-        return fig
-        
-    except Exception as e:
-        logger.error(f"Error plotting corner analysis: {e}")
         return None
 
 def plot_tyre_shape(session, driver):

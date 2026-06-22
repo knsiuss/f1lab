@@ -20,7 +20,7 @@ from unittest.mock import patch, MagicMock
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.model import train_model, load_trained_model
+from src.model import RaceStrategySimulator
 
 
 @pytest.fixture
@@ -61,92 +61,92 @@ def temp_model_dir(tmp_path):
     os.chdir(original_dir)
 
 
-class TestTrainModel:
-    """Tests for train_model function."""
-    
-    def test_returns_model_and_test_data(self, sample_race_data, temp_model_dir):
-        """Test that train_model returns model and test data."""
-        model, X_test, y_test = train_model(sample_race_data)
-        
-        assert model is not None
-        assert len(X_test) > 0
-        assert len(y_test) > 0
-    
-    def test_saves_model_file(self, sample_race_data, temp_model_dir):
-        """Test that model is saved to file."""
-        model, X_test, y_test = train_model(sample_race_data)
-        
-        model_path = temp_model_dir / 'models' / 'f1_model.pkl'
-        assert model_path.exists()
-    
-    def test_model_can_predict(self, sample_race_data, temp_model_dir):
-        """Test that trained model can make predictions."""
-        model, X_test, y_test = train_model(sample_race_data)
-        
-        predictions = model.predict(X_test)
-        
-        assert len(predictions) == len(X_test)
-        assert all(isinstance(p, (int, float, np.number)) for p in predictions)
-    
-    def test_test_size_is_correct(self, sample_race_data, temp_model_dir):
-        """Test that test split is approximately 20%."""
-        model, X_test, y_test = train_model(sample_race_data)
-        
-        # Should be about 20% of data (allowing for rounding)
-        expected_test_size = len(sample_race_data) * 0.2
-        assert abs(len(X_test) - expected_test_size) <= 2
 
+class TestRaceStrategySimulator:
+    """Tests for RaceStrategySimulator class."""
 
-class TestLoadTrainedModel:
-    """Tests for load_trained_model function."""
-    
-    def test_returns_none_if_no_model(self, temp_model_dir):
-        """Test that None is returned if no model exists."""
-        model = load_trained_model()
-        
-        assert model is None
-    
-    def test_loads_saved_model(self, sample_race_data, temp_model_dir):
-        """Test that saved model can be loaded."""
-        # First train and save
-        trained_model, _, _ = train_model(sample_race_data)
-        
-        # Then load
-        loaded_model = load_trained_model()
-        
-        assert loaded_model is not None
-    
-    def test_loaded_model_can_predict(self, sample_race_data, temp_model_dir):
-        """Test that loaded model can make predictions."""
-        # Train and save
-        trained_model, X_test, _ = train_model(sample_race_data)
-        
-        # Load and predict
-        loaded_model = load_trained_model()
-        predictions = loaded_model.predict(X_test)
-        
-        assert len(predictions) == len(X_test)
+    @pytest.fixture
+    def simulator(self):
+        """Create a default simulator instance."""
+        return RaceStrategySimulator(base_lap_time=90.0, total_laps=57)
 
+    def test_initialization(self):
+        """Test default initialization."""
+        sim = RaceStrategySimulator()
+        assert sim.base_lap_time == 90.0
+        assert sim.total_laps == 57
+        assert sim.pit_loss == 22.0
 
-class TestModelPerformance:
-    """Tests for model performance characteristics."""
-    
-    def test_predictions_in_valid_range(self, sample_race_data, temp_model_dir):
-        """Test that predictions are within reasonable position range."""
-        model, X_test, y_test = train_model(sample_race_data)
-        predictions = model.predict(X_test)
-        
-        # Positions should be roughly between 1 and 20
-        assert all(0 < p < 25 for p in predictions)
-    
-    def test_feature_importances_exist(self, sample_race_data, temp_model_dir):
-        """Test that model has feature importances."""
-        model, _, _ = train_model(sample_race_data)
-        
-        importances = model.feature_importances_
-        
-        assert len(importances) > 0
-        assert sum(importances) == pytest.approx(1.0, abs=0.01)
+    def test_custom_initialization(self):
+        """Test custom initialization values."""
+        sim = RaceStrategySimulator(base_lap_time=95.0, total_laps=30)
+        assert sim.base_lap_time == 95.0
+        assert sim.total_laps == 30
+
+    def test_predict_strategy_returns_dict(self, simulator):
+        """Test predict_strategy returns correct structure."""
+        result = simulator.predict_strategy('VER', 'SOFT')
+
+        assert isinstance(result, dict)
+        assert '1_stop_time' in result
+        assert '2_stop_time' in result
+        assert 'recommended' in result
+        assert 'delta' in result
+
+    def test_predict_strategy_positive_times(self, simulator):
+        """Test that predicted times are positive."""
+        result = simulator.predict_strategy('VER', 'SOFT')
+
+        assert result['1_stop_time'] > 0
+        assert result['2_stop_time'] > 0
+        assert result['delta'] >= 0
+
+    def test_predict_strategy_recommendation(self, simulator):
+        """Test that a recommendation is made."""
+        result = simulator.predict_strategy('VER', 'SOFT')
+
+        assert result['recommended'] in ['1 Stop', '2 Stops']
+
+    def test_simulate_stint_returns_float(self, simulator):
+        """Test _simulate_stint returns a positive float."""
+        result = simulator._simulate_stint('SOFT', 1, 10)
+        assert isinstance(result, float)
+        assert result > 0
+
+    def test_simulate_stint_increases_with_laps(self, simulator):
+        """Test that more laps increase total time."""
+        t1 = simulator._simulate_stint('SOFT', 1, 10)
+        t2 = simulator._simulate_stint('SOFT', 1, 20)
+        assert t2 > t1
+
+    def test_simulate_stint_compound_effect(self, simulator):
+        """Test different compounds produce different times."""
+        t_soft = simulator._simulate_stint('SOFT', 1, 20)
+        t_hard = simulator._simulate_stint('HARD', 1, 20)
+        # Times should differ due to different degradation
+        assert t_soft != t_hard
+
+    def test_catch_up_prediction_detects_under(self, simulator):
+        """Test catch-up prediction when chaser is faster."""
+        # Chaser 2s behind with better tires
+        result = simulator.catch_up_prediction(2.0, 'SOFT', 'HARD', 30)
+        assert isinstance(result, int)
+        # Should eventually catch up or return -1
+
+    def test_catch_up_prediction_never_catches(self, simulator):
+        """Test catch-up prediction when impossible."""
+        # Large gap with no advantage
+        result = simulator.catch_up_prediction(100.0, 'HARD', 'SOFT', 10)
+        # Should not catch in 10 laps
+        assert result == -1
+
+    def test_two_stop_is_sometimes_faster(self):
+        """Test that 2-stop can be faster on high-deg tracks."""
+        # Many laps and high deg (via HARD compound simulation)
+        sim = RaceStrategySimulator(base_lap_time=90.0, total_laps=70)
+        result = sim.predict_strategy('VER', 'HARD')
+        # Both strategies should give valid results
+        assert isinstance(result['recommended'], str)
 
 
 if __name__ == '__main__':

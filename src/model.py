@@ -2,86 +2,38 @@
 """
 model.py
 ~~~~~~~~
-Race position prediction model.
+Race strategy simulation tools.
 
 :copyright: (c) 2025 F1 Analytics
 :license: MIT
 """
 
 import logging
-import os
-import pickle
-from typing import Optional, Tuple
-
-import pandas as pd
-from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.model_selection import train_test_split
-
-try:
-    from src.features import prepare_features
-except ImportError:
-    from features import prepare_features
 
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = 'models/f1_model.pkl'
-N_ESTIMATORS = 100
-TEST_SIZE = 0.2
-RANDOM_STATE = 42
+
+def calculate_degradation_curve(compound: str) -> float:
+    """
+    Calculate time loss per lap due to tire wear (seconds).
+    Returns the degradation factor (s/lap).
+    """
+    c = str(compound).upper()
+    if 'SOFT' in c: return 0.12   # High deg
+    if 'MEDIUM' in c: return 0.08 # Medium deg
+    if 'HARD' in c: return 0.04   # Low deg
+    if 'INTER' in c: return 0.05
+    if 'WET' in c: return 0.05
+    return 0.08
 
 
-def train_model(
-    df: pd.DataFrame
-) -> Tuple[HistGradientBoostingRegressor, pd.DataFrame, pd.Series]:
-    """Train position prediction model on race data."""
-    logger.info("Starting model training...")
-    
-    # Prepare features
-    logger.info("Preparing features...")
-    X, y, _ = prepare_features(df, train_mode=True)
-    
-    # Split data
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, 
-        test_size=TEST_SIZE, 
-        random_state=RANDOM_STATE
-    )
-    logger.info(f"Train size: {len(X_train)}, Test size: {len(X_test)}")
-    
-    # Train model
-    logger.info(f"Training HistGradientBoostingRegressor...")
-    model = HistGradientBoostingRegressor(
-        max_iter=N_ESTIMATORS,
-        learning_rate=0.1,
-        max_depth=10,
-        random_state=RANDOM_STATE,
-        early_stopping=True
-    )
-    model.fit(X_train, y_train)
-    
-    # Save model
-    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-    with open(MODEL_PATH, 'wb') as f:
-        pickle.dump(model, f)
-    logger.info(f"Model saved to {MODEL_PATH}")
-    
-    # Log feature importances
-    feature_names = X.columns.tolist()
-    importances = dict(zip(feature_names, model.feature_importances_))
-    logger.info(f"Feature importances: {importances}")
-    
-    return model, X_test, y_test
-
-
-def load_trained_model() -> Optional[HistGradientBoostingRegressor]:
-    """Load persisted model from disk."""
-    try:
-        if os.path.exists(MODEL_PATH):
-            with open(MODEL_PATH, 'rb') as f:
-                return pickle.load(f)
-    except:
-        pass
-    return None
+def calculate_fuel_correction(current_lap: int, total_laps: int) -> float:
+    """
+    Calculate time gained due to fuel burn (seconds).
+    Returns negative time delta (time gained) relative to heavy start.
+    Avg gain ~0.06s per lap driven.
+    """
+    return float(current_lap) * -0.06
 
 
 class RaceStrategySimulator:
@@ -114,8 +66,6 @@ class RaceStrategySimulator:
 
     def _simulate_stint(self, compound: str, start_lap: int, end_lap: int) -> float:
         """Simulate total time for a stint."""
-        from features import calculate_degradation_curve, calculate_fuel_correction
-        
         total_time = 0.0
         deg_factor = calculate_degradation_curve(compound)
         
@@ -135,8 +85,6 @@ class RaceStrategySimulator:
         Predict lap when chaser catches leader.
         Returns lap number or -1 if never.
         """
-        from features import calculate_degradation_curve
-        
         deg_chaser = calculate_degradation_curve(chaser_tire)
         deg_leader = calculate_degradation_curve(leader_tire)
         
