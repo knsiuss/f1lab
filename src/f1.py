@@ -16,7 +16,7 @@ import sys
 # Ensure src/ is on the path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import STREAMLIT_CONFIG, TEAM_COLORS, _ensure_dirs
+from config import STREAMLIT_CONFIG, TEAM_COLORS, FASTF1_CONFIG, _ensure_dirs
 from shared import (
     load_race_data, get_total_points_combined,
     setup_fastf1_cache
@@ -71,7 +71,15 @@ def main():
         st.markdown(f"<h1 style='color:#E10600; margin:0; font-size:1.8rem;'>F1 {st.session_state.selected_year}</h1>", unsafe_allow_html=True)
         st.markdown("---")
 
-        st.session_state.selected_year = 2025
+        # Season selector -- FastF1-supported historical seasons.
+        # Pages degrade gracefully (show "No data available") for years
+        # without local CSV results.
+        supported_years = FASTF1_CONFIG.get_supported_years()
+        current_year = st.session_state.selected_year
+        default_index = supported_years.index(current_year) if current_year in supported_years else -1
+        st.session_state.selected_year = st.selectbox(
+            "Season", supported_years, index=default_index,
+        )
         st.markdown("---")
 
         if df is not None:
