@@ -898,12 +898,19 @@ def _render_session_compare(laps, race_name, year, session_type):
         "sessions. Base pace removes the effect of tyre age, so the delta is a fair pace "
         "read rather than raw lap time."
     )
-    other_types = [t for t in ("Qualifying", "Race", "Sprint") if t != session_type]
-    if not other_types:
-        st.info("No other session type to compare against in this view.")
+    # Stint keys only align meaningfully between race-format sessions (Race ↔
+    # Sprint). Qualifying laps have stint numbers that don't correspond to race
+    # stints, so pairing them here would manufacture a misleading delta.
+    partners = {"Race": ["Sprint"], "Sprint": ["Race"]}.get(session_type, [])
+    if not partners:
+        st.info(
+            "Stint-keyed pace comparison is offered between race-format sessions "
+            "(**Race ↔ Sprint**). Qualifying lap stint numbers don't correspond to race "
+            "stints, so it is excluded rather than showing a misleading delta."
+        )
         return
     ref = st.selectbox(
-        "Compare against", other_types, key="compare_ref_session",
+        "Compare against", partners, key="compare_ref_session",
         help="Reference session. Delta is (current − reference); negative = current faster.",
     )
     st.caption(

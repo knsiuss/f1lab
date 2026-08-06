@@ -30,7 +30,23 @@ sys.path.insert(0, str(Path(__file__).parent))
 from pace import clean_laps_for_analysis, data_quality
 
 ESTIMATED = "estimated"
-SECTORS = ["Sector1", "Sector2", "Sector3"]
+SECTOR_SUFFIXES = ["1", "2", "3"]
+
+
+def _sector_source(clean: pd.DataFrame) -> dict:
+    """Map each sector index to the column that actually holds its time.
+
+    FastF1 lap tables name these ``Sector1``/``Sector2``/``Sector3`` on some
+    builds and ``Sector1Time``/``Sector2Time``/``Sector3Time`` on others, so we
+    resolve the present spelling once rather than hardcode one.
+    """
+    cols = {}
+    for s in SECTOR_SUFFIXES:
+        for cand in (f"Sector{s}", f"Sector{s}Time"):
+            if cand in clean.columns:
+                cols[s] = cand
+                break
+    return cols
 
 
 def _sec_to_float(series: pd.Series) -> pd.Series:
@@ -44,9 +60,8 @@ def _clean_with_sectors(laps: pd.DataFrame) -> pd.DataFrame:
     clean = clean_laps_for_analysis(laps)
     if clean.empty:
         return clean
-    for s in SECTORS:
-        if s in clean.columns:
-            clean[s] = _sec_to_float(clean[s])
+    for col in _sector_source(clean).values():
+        clean[col] = _sec_to_float(clean[col])
     return clean
 
 
@@ -71,26 +86,27 @@ def sector_summary(laps: pd.DataFrame,
             return pd.DataFrame()
 
     rows = []
+    src = _sector_source(clean)
     for d, grp in clean.groupby('Driver', dropna=False):
         n = len(grp)
         quality = data_quality(n)
         row = {"Driver": d, "N": n,
                "Level": quality["level"], "Confidence": quality["confidence"],
                "Estimated": ESTIMATED}
-        for s in SECTORS:
-            if s in grp.columns:
-                vals = grp[s].dropna()
-                if vals.empty:
-                    continue
-                row[f"{s}Best"] = round(float(vals.min()), 3)
-                row[f"{s}Mean"] = round(float(vals.mean()), 3)
-                row[f"{s}Std"] = round(float(vals.std()), 4)
+        for s, col in src.items():
+            vals = grp[col].dropna()
+            if vals.empty:
+                continue
+            row[f"Sector{s}Best"] = round(float(vals.min()), 3)
+            row[f"Sector{s}Mean"] = round(float(vals.mean()), 3)
+            row[f"Sector{s}Std"] = round(float(vals.std()), 4)
         rows.append(row)
 
     out = pd.DataFrame(rows)
+    first_key = f"Sector{SECTOR_SUFFIXES[0]}Best"
     if not out.empty:
         out = out.sort_values(
-            [f"{SECTORS[0]}Best"] if f"{SECTORS[0]}Best" in out.columns else 'Driver'
+            [first_key] if first_key in out.columns else 'Driver'
         ).reset_index(drop=True)
     return out
 
@@ -112,12 +128,12 @@ def sector_deficits(laps: pd.DataFrame,
     if clean.empty or 'Driver' not in clean.columns:
         return pd.DataFrame()
 
+    src = _sector_source(clean)
     best = {}
-    for s in SECTORS:
-        if s in clean.columns:
-            vals = clean[s].dropna()
-            if not vals.empty:
-                best[s] = float(vals.min())
+    for s, col in src.items():
+        vals = clean[col].dropna()
+        if not vals.empty:
+            best[s] = float(vals.min())
 
     if not best:
         return pd.DataFrame()
@@ -129,18 +145,19 @@ def sector_deficits(laps: pd.DataFrame,
         row = {"Driver": d, "N": n,
                "Level": quality["level"], "Confidence": quality["confidence"],
                "Estimated": ESTIMATED}
-        for s in SECTORS:
-            if s not in best or s not in grp.columns:
-                row[f"{s}Def"] = None
+        for s, col in src.items():
+            if s not in best:
+                row[f"Sector{s}Def"] = None
                 continue
-            vals = grp[s].dropna()
+            vals = grp[col].dropna()
             if vals.empty:
-                row[f"{s}Def"] = None
+                row[f"Sector{s}Def"] = None
             else:
-                row[f"{s}Def"] = round(float(vals.min()) - best[s], 3)
+                row[f"Sector{s}Def"] = round(float(vals.min()) - best[s], 3)
         rows.append(row)
 
     out = pd.DataFrame(rows)
-    if not out.empty and f"{SECTORS[0]}Def" in out.columns:
-        out = out.sort_values(f"{SECTORS[0]}Def").reset_index(drop=True)
+    first_def = f"Sector{SECTOR_SUFFIXES[0]}Def"
+    if not out.empty and first_def in out.columns:
+        out = out.sort_values(first_def).reset_index(drop=True)
     return out

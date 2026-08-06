@@ -42,6 +42,20 @@ def test_sector_summary_multiple_drivers_sorted_by_s1():
     assert list(out['Driver']) == ['VER', 'LEC']
 
 
+def test_sector_summary_accepts_sector_time_spelling():
+    # FastF1 builds name these Sector1Time/Sector2Time/Sector3Time; both
+    # spellings must work without the module hardcoding one.
+    df = _laps().rename(columns={
+        'Sector1': 'Sector1Time', 'Sector2': 'Sector2Time', 'Sector3': 'Sector3Time',
+    })
+    out = sector_summary(df)
+    assert len(out) == 1
+    assert out.iloc[0]['Sector1Best'] == 28.0
+    dfits = sector_deficits(df)
+    assert not dfits.empty
+    assert dfits.iloc[0]['Sector1Def'] == 0.0
+
+
 def test_sector_summary_missing_sectors_ok():
     df = _laps().drop(columns=['Sector3'])
     out = sector_summary(df)

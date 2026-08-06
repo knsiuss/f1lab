@@ -341,5 +341,30 @@ def page():
         except Exception as e:
             st.info(f"Progression unavailable: {e}")
 
+    _honest_positioning()
+
+
+def _honest_positioning():
+    """Compact, honest 'About & Limitations' block with data framing."""
+    st.markdown("---")
+    with st.expander("About F1 Lab & What It Is Not"):
+        st.markdown(
+            "**What this is.** F1 Lab is a public-data analytics workbench for "
+            "post-session analysis, strategy rehearsal, race briefing and competitor "
+            "research. It reads publicly available season results and, where requested, "
+            "lap-level session data, and turns them into explainable pace, strategy and "
+            "prediction views.\n\n"
+            "**What it is not.** It is not a race-critical tool. It is not live pit-wall "
+            "software, and it does **not** include any team's internal telemetry, setup or "
+            "car information. Do not treat any readout here as a substitute for a team's "
+            "operational data or for official timing.\n\n"
+            "**How to read the numbers.** Anything derived rather than directly measured is "
+            "labelled *estimated* and carries a confidence level. When a sample is too small, "
+            "too noisy or simply missing, the app says *insufficient data* instead of "
+            "fabricating an answer. Predictions and strategy recommendations are validated "
+            "by historical walk-forward backtesting where possible — and their remaining "
+            "assumptions and failures are shown, not hidden."
+        )
+
 
 page()
