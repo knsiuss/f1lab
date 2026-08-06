@@ -37,6 +37,13 @@ GREEN_TRACK_STATUS = {1}
 # Minimum clean laps before a pace/degradation estimate is shown at all.
 MIN_LAPS_FOR_FIT = 2
 
+# Sample-size thresholds for the data-quality labels in data_quality(). These
+# define the honesty contract shared across modules: "good" needs at least
+# GOOD_LAPS clean laps, "moderate" at least MODERATE_LAPS; anything above
+# MIN_LAPS_FOR_FIT is "low", anything below that is "insufficient".
+GOOD_LAPS = 15
+MODERATE_LAPS = 8
+
 _DEFAULT_QUALITY = {"level": "insufficient", "confidence": "low", "n": 0,
                     "estimated": ESTIMATED}
 
@@ -115,9 +122,9 @@ def _clean_pool(laps: pd.DataFrame) -> pd.DataFrame:
 
 def data_quality(n: int) -> Dict[str, str]:
     """Classify the number of clean laps into a data-quality/confidence level."""
-    if n >= 15:
+    if n >= GOOD_LAPS:
         level, conf = "good", "high"
-    elif n >= 8:
+    elif n >= MODERATE_LAPS:
         level, conf = "moderate", "medium"
     elif n >= MIN_LAPS_FOR_FIT:
         level, conf = "low", "low"

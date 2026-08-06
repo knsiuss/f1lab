@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from shared import load_race_data, show_plotly_chart
-from config import DATA_DIR, TEAM_COLORS
+from config import DATA_DIR, TEAM_COLORS, FASTF1_CONFIG
 from loader import load_data as load_csv_data
 from season_config import get_race_names
 from styles import (
@@ -51,7 +51,7 @@ def _load_grid(year, race, race_df):
 
 
 def page():
-    year = st.session_state.get('selected_year', 2025)
+    year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
     df = load_race_data(year)
     if df is None or df.empty:
         st.error("No data available")

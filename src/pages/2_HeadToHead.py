@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from shared import load_race_data, show_plotly_chart
-from config import TEAM_COLORS
+from config import TEAM_COLORS, FASTF1_CONFIG
 from styles import (
     GRID, LABEL_FONT, TEXT_PRIMARY, TEXT_SECONDARY, TITLE_FONT,
     fig_layout as _fig_layout,
@@ -28,7 +28,7 @@ def _driver_color(driver, team_map):
 
 
 def page():
-    year = st.session_state.get('selected_year', 2025)
+    year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
     df = load_race_data(year)
 
     if df is None or df.empty:
@@ -122,7 +122,7 @@ def _tab_matchup(race_df):
 
     result = calculate_matchup(race_df, d1, d2)
     if result is None:
-        st.info(f"{d1} and {d2} have no shared races in {st.session_state.get('selected_year', 2025)}.")
+        st.info(f"{d1} and {d2} have no shared races in {st.session_state.get('selected_year', FASTF1_CONFIG.default_year)}.")
         return
 
     s = result['summary']

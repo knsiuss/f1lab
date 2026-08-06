@@ -14,6 +14,7 @@ import logging
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 from pathlib import Path
+from config import FASTF1_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ def get_session_info(session: Any) -> Dict[str, Any]:
             'session_name': session.name,
             'session_type': session.session_type if hasattr(session, 'session_type') else 'Unknown',
             'date': str(session.date.date()) if session.date else 'Unknown',
-            'year': event.get('EventDate', datetime.now()).year if hasattr(event.get('EventDate', datetime.now()), 'year') else 2025,
+            'year': event.get('EventDate', datetime.now()).year if hasattr(event.get('EventDate', datetime.now()), 'year') else FASTF1_CONFIG.default_year,
         }
         
         # Session start time - format as HH:MM:SS only

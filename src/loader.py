@@ -101,36 +101,36 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
         logger.exception(f"Error cleaning data: {e}")
         raise
 
-def load_combined_data(data_dir: str) -> Optional[pd.DataFrame]:
+def load_combined_data(data_dir: str, year: int) -> Optional[pd.DataFrame]:
     """
-    Load and combine Race and Sprint results.
-    
+    Load and combine Race and Sprint results for a season.
+
     Args:
         data_dir: Directory containing the CSV files.
-        
+        year: Season year used in the CSV filenames.
+
     Returns:
         pd.DataFrame: Combined DataFrame containing both race and sprint results.
     """
     try:
-        race_path = Path(data_dir) / 'Formula1_2025Season_RaceResults.csv'
-        sprint_path = Path(data_dir) / 'Formula1_2025Season_SprintResults.csv'
-        
+        race_path = Path(data_dir) / f'Formula1_{year}Season_RaceResults.csv'
+        sprint_path = Path(data_dir) / f'Formula1_{year}Season_SprintResults.csv'
+
         df_race = load_data(str(race_path))
-        
+
         if df_race is None:
             return None
-            
+
         df_race['SessionType'] = 'Race'
-        
+
         if sprint_path.exists():
             df_sprint = load_data(str(sprint_path))
             if df_sprint is not None and not df_sprint.empty:
                 df_sprint['SessionType'] = 'Sprint'
-                # Ensure we don't have conflicting index or columns if concatenating
                 return pd.concat([df_race, df_sprint], ignore_index=True)
-        
+
         return df_race
-        
+
     except Exception as e:
         logger.error(f"Error loading combined data: {e}")
         return None

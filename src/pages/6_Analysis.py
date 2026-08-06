@@ -11,7 +11,7 @@ from shared import (
     load_race_data, load_fastf1_session, setup_fastf1_cache,
     show_plotly_chart, format_f1_time
 )
-from config import TEAM_COLORS
+from config import TEAM_COLORS, FASTF1_CONFIG
 from season_config import get_race_names
 from fastf1_extended import (
     get_tyre_stints, get_pit_stops, get_race_control_messages,
@@ -35,7 +35,7 @@ from styles import (
 DEFAULT_DRIVERS = 3  # Show fewer drivers by default for clarity
 
 def page():
-    year = st.session_state.get('selected_year', 2025)
+    year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
     df = load_race_data(year)
 
     if df is None or df.empty:

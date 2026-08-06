@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from shared import load_race_data, show_plotly_chart
-from config import TEAM_COLORS
+from config import TEAM_COLORS, FASTF1_CONFIG
 from season_config import get_completed_races, get_race_names
 from styles import (
     GRID, LABEL_FONT, TEXT_PRIMARY, TEXT_SECONDARY, TITLE_FONT,
@@ -27,7 +27,7 @@ def _team_color_map(df):
     return colors
 
 def page():
-    year = st.session_state.get('selected_year', 2025)
+    year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
     df = load_race_data(year)
 
     if df is None or df.empty:
