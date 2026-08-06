@@ -20,6 +20,8 @@ from fastf1_extended import (
 from model import RaceStrategySimulator
 from pace import normalised_pace_by_stint, long_run_quality
 from whatif import Scenario, compare_scenarios, undercut_delta
+from sector import sector_summary, sector_deficits
+from compare import compare_sessions
 import fastf1
 from datetime import timedelta
 
@@ -102,7 +104,7 @@ def page():
     _render_kpi_row(laps, session)
 
     # â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    tabs = st.tabs(["Pace & Laps", "Strategy & Stints", "Race Battles", "Performance Insights"])
+    tabs = st.tabs(["Pace & Laps", "Strategy & Stints", "Race Battles", "Performance Insights", "Sector & Sessions"])
 
     with tabs[0]:
         _tab_pace(laps, session, selected_race)
@@ -115,6 +117,9 @@ def page():
 
     with tabs[3]:
         _tab_insights(laps, session)
+
+    with tabs[4]:
+        _tab_sector_compare(laps, selected_race, year, session_type)
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -842,6 +847,102 @@ def _tab_battles(laps, session):
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # TAB 4: PERFORMANCE INSIGHTS
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+def _tab_sector_compare(laps, race_name, year, session_type):
+    """Sector / corner insights and session-to-session pace comparison."""
+    _render_sector_insights(laps)
+    st.markdown("---")
+    _render_session_compare(laps, race_name, year, session_type)
+
+
+def _render_sector_insights(laps):
+    st.subheader("Sector Insights (estimated)")
+    st.caption(
+        "Where each driver's pace lives on the lap: per-sector best, average and "
+        "consistency, plus the deficit to the session-best sector time. Figures are "
+        "estimates computed from clean laps only (out/in and Safety Car laps removed)."
+    )
+    if not any(s in laps.columns for s in ("Sector1", "Sector2", "Sector3")):
+        st.info("No sector timing available in this session's lap table.")
+        return
+
+    try:
+        summary = sector_summary(laps)
+        deficits = sector_deficits(laps)
+    except Exception as e:
+        st.warning(f"Sector analysis unavailable: {e}")
+        return
+
+    if summary is None or summary.empty:
+        st.info("Not enough clean laps to estimate sector pace — analysis skipped.")
+        return
+
+    c_left, c_right = st.columns(2)
+    with c_left:
+        st.markdown("##### Per-driver sector stats")
+        st.dataframe(summary, use_container_width=True, hide_index=True)
+    with c_right:
+        st.markdown("##### Deficit to session-best sector (s)")
+        st.dataframe(deficits, use_container_width=True, hide_index=True)
+
+    st.caption(
+        "Level reflects the number of clean laps behind each row (good ≥ 15, moderate ≥ 8, "
+        "low ≥ 2, insufficient < 2). A row marked low/insufficient is a small sample — treat "
+        "the estimate with caution."
+    )
+
+
+def _render_session_compare(laps, race_name, year, session_type):
+    st.subheader("Session-to-Session Comparison (estimated)")
+    st.caption(
+        "Compares normalised base pace (fresh-tyre lap time) per driver/stint across two "
+        "sessions. Base pace removes the effect of tyre age, so the delta is a fair pace "
+        "read rather than raw lap time."
+    )
+    other_types = [t for t in ("Qualifying", "Race", "Sprint") if t != session_type]
+    if not other_types:
+        st.info("No other session type to compare against in this view.")
+        return
+    ref = st.selectbox(
+        "Compare against", other_types, key="compare_ref_session",
+        help="Reference session. Delta is (current − reference); negative = current faster.",
+    )
+    st.caption(
+        f"Comparing **{session_type}** (current, primary) against **{ref}** (reference). "
+        "Negative Delta = the current session was faster at equal tyre age."
+    )
+
+    with st.spinner(f"Loading {ref} session..."):
+        try:
+            setup_fastf1_cache()
+            ref_session = load_fastf1_session(year, race_name, ref)
+        except Exception as e:
+            st.warning(f"Reference session unavailable: {e}")
+            return
+
+    if ref_session is None or ref_session.laps is None or ref_session.laps.empty:
+        st.info(f"No lap data available for {race_name} ({ref}).")
+        return
+
+    out = compare_sessions(laps, ref_session.laps)
+    if out is None or out.empty:
+        st.info(
+            "No matching drivers/stints with enough clean laps in both sessions — comparison "
+            "is skipped rather than reported on noise."
+        )
+        return
+
+    display = out.rename(columns={
+        'Delta': 'Delta (s)',
+        'BasePace_A': f'BasePace {session_type} (s)',
+        'BasePace_B': f'BasePace {ref} (s)',
+    })
+    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.caption(
+        "All figures are estimates with a confidence level from each driver's clean-lap "
+        "sample. Rows without enough clean laps in either session are excluded."
+    )
+
+
 def _tab_insights(laps, session):
     st.subheader("Driver Performance Scores")
 
