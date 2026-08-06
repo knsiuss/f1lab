@@ -18,6 +18,9 @@ Assumptions (all overridable, all surfaced in the result):
     * average pit loss in seconds (from config.MODEL_CONFIG)
     * a safety car / VSC event is a one-off additive delay (no re-stack logic)
     * weather is an additive per-lap penalty while it lasts
+    * traffic is an additive per-lap penalty while it lasts
+    * a rival response is a one-off additive delay; the interaction itself
+      (mirror stops, track-position swaps) is not modelled
 
 :copyright: (c) 2025 F1 Analytics
 :license: MIT
@@ -118,6 +121,8 @@ def simulate_scenario(
     pit_loss: float = MODEL_CONFIG["pit_loss_sec"],
     weather_penalty: float = 0.0,
     sc_delay: float = 0.0,
+    traffic_penalty: float = 0.0,
+    rival_response: float = 0.0,
 ) -> Dict[str, object]:
     """
     Project total race time for a Scenario.
@@ -131,6 +136,10 @@ def simulate_scenario(
         pit_loss: average seconds lost per pit stop.
         weather_penalty: additive seconds per lap while a weather window lasts.
         sc_delay: one-off additive seconds from a Safety Car / VSC event.
+        traffic_penalty: additive seconds per lap lost to traffic (e.g. being
+            held behind a slower car after an overcut).
+        rival_response: one-off additive seconds from a rival reacting to this
+            strategy (e.g. matching the stop or defending track position).
 
     Returns:
         dict with ``total_time`` (est, seconds), ``n_stops``, ``stints`` and
@@ -140,12 +149,15 @@ def simulate_scenario(
     if not stints:
         return {"level": "insufficient", "estimated": ESTIMATED,
                 "assumptions": _assumptions(base_lap_time, fuel_gain, pit_loss,
-                                            weather_penalty, sc_delay)}
+                                            weather_penalty, sc_delay,
+                                            traffic_penalty, rival_response)}
 
     stop_loss = max(0, len(stints) - 1) * pit_loss
     weather_total = weather_penalty * total_laps
+    traffic_total = traffic_penalty * total_laps
 
-    total = stop_loss + weather_total + sc_delay
+    total = (stop_loss + weather_total + traffic_total
+             + sc_delay + rival_response)
     for compound, start_lap, end_lap in stints:
         total += stint_time(compound, start_lap, end_lap, base_lap_time,
                             deg_rates, fuel_gain)
@@ -159,18 +171,21 @@ def simulate_scenario(
         "estimated": ESTIMATED,
         "confidence": scenario.confidence,
         "assumptions": _assumptions(base_lap_time, fuel_gain, pit_loss,
-                                    weather_penalty, sc_delay),
+                                    weather_penalty, sc_delay,
+                                    traffic_penalty, rival_response),
     }
 
 
-def _assumptions(base_lap_time, fuel_gain, pit_loss, weather_penalty,
-                 sc_delay) -> List[str]:
+def _assumptions(base_lap_time, fuel_gain, pit_loss, weather_penalty, sc_delay,
+                 traffic_penalty=0.0, rival_response=0.0) -> List[str]:
     return [
         f"base lap time (fresh tyre): {base_lap_time}s (estimated)",
         f"fuel gain per lap: {fuel_gain}s",
         f"pit loss per stop: {pit_loss}s",
         f"weather penalty: {weather_penalty}s/lap",
         f"safety car / VSC delay: {sc_delay}s",
+        f"traffic penalty: {traffic_penalty}s/lap",
+        f"rival response delay: {rival_response}s",
     ]
 
 
@@ -233,14 +248,20 @@ def undercut_delta(
     fuel_gain: float = MODEL_CONFIG["fuel_gain_per_lap"],
     pit_loss: float = MODEL_CONFIG["pit_loss_sec"],
     earlier_by: int = 1,
+    traffic_penalty: float = 0.0,
+    rival_response: float = 0.0,
 ) -> Dict[str, float]:
     """
     Projected time effect of stopping ``earlier_by`` laps sooner (undercut).
 
     Compares two one-stop strategies that differ only in the pit-stop lap.
     A negative delta means stopping earlier projects to a faster race under
-    the stated assumptions. The estimate ignores traffic and rival response,
-    which are listed as assumptions.
+    the stated assumptions.
+
+    ``traffic_penalty`` applies to both variants (held-up traffic is symmetric
+    by assumption); ``rival_response`` is a one-off penalty charged to the
+    earlier variant only, modelling a rival reacting to the undercut by
+    covering or defending. Both are surfaced in the returned assumptions.
 
     Returns:
         dict: ``delta_sec`` (earlier minus later, negative = earlier faster),
@@ -252,10 +273,12 @@ def undercut_delta(
                      stop_laps=[total_laps // 2])
     t_early = simulate_scenario(earlier, total_laps, base_lap_time=base_lap_time,
                                 deg_rates=deg_rates, fuel_gain=fuel_gain,
-                                pit_loss=pit_loss)["total_time"]
+                                pit_loss=pit_loss, traffic_penalty=traffic_penalty,
+                                rival_response=rival_response)["total_time"]
     t_late = simulate_scenario(later, total_laps, base_lap_time=base_lap_time,
                                deg_rates=deg_rates, fuel_gain=fuel_gain,
-                               pit_loss=pit_loss)["total_time"]
+                               pit_loss=pit_loss,
+                               traffic_penalty=traffic_penalty)["total_time"]
     return {
         "delta_sec": round(t_early - t_late, 3),
         "earlier_lap": total_laps // 2 - earlier_by,
@@ -263,7 +286,8 @@ def undercut_delta(
         "estimated": ESTIMATED,
         "assumptions": [
             "identical tyre-age history before the stop",
-            "no traffic or rival response",
+            f"traffic penalty: {traffic_penalty}s/lap (applied to both)",
+            f"rival response to the earlier stop: {rival_response}s (earlier only)",
             "pit loss identical for both",
         ],
     }

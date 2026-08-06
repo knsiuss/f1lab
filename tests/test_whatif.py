@@ -108,3 +108,30 @@ def test_weather_and_sc_delay_add_time():
         sc, total_laps=30, weather_penalty=0.5, sc_delay=8.0
     )["total_time"]
     assert with_events == pytest.approx(clean + 0.5 * 30 + 8.0, abs=0.01)
+
+
+def test_traffic_and_rival_response_add_time():
+    sc = Scenario(name="base", compounds=["SOFT", "HARD"], stop_laps=[15])
+    clean = simulate_scenario(sc, total_laps=30)["total_time"]
+    with_social = simulate_scenario(
+        sc, total_laps=30, traffic_penalty=0.3, rival_response=5.0
+    )
+    assert with_social["total_time"] == pytest.approx(
+        clean + 0.3 * 30 + 5.0, abs=0.01)
+    assert any("traffic penalty" in a for a in with_social["assumptions"])
+    assert any("rival response delay" in a for a in with_social["assumptions"])
+
+
+def test_undercut_delta_with_rival_response():
+    # A large rival reaction to the earlier stop can flip a beneficial undercut.
+    base = undercut_delta(total_laps=30, compound_new="HARD",
+                          compound_old="SOFT", earlier_by=1)
+    reacted = undercut_delta(total_laps=30, compound_new="HARD",
+                             compound_old="SOFT", earlier_by=1,
+                             rival_response=10.0)
+    # rival_response charges the earlier variant -> delta moves +10 towards
+    # "later faster".
+    assert reacted["delta_sec"] == pytest.approx(
+        base["delta_sec"] + 10.0, abs=0.01)
+    assert any("rival response to the earlier stop" in a
+               for a in reacted["assumptions"])

@@ -586,8 +586,19 @@ def _tab_strategy(laps, session, race_name):
                  compounds=[start_tire, "MEDIUM", "HARD"],
                  stop_laps=[mid // 2, mid]),
     ]
+    prov1, prov2, prov3 = st.columns(3)
+    with prov1:
+        traffic_pen = st.number_input("Traffic penalty (s/lap)", 0.0, 2.0, 0.0,
+                                      step=0.1, key="strat_traffic")
+    with prov2:
+        rival_resp = st.number_input("Rival response (s, one-off)", 0.0, 30.0, 0.0,
+                                     step=0.5, key="strat_rival")
+    with prov3:
+        st.caption("")
+
     cmp_df = compare_scenarios(
-        scenarios, total_laps=int(total_laps_sim), base_lap_time=float(base_lap)
+        scenarios, total_laps=int(total_laps_sim), base_lap_time=float(base_lap),
+        traffic_penalty=float(traffic_pen), rival_response=float(rival_resp)
     )
     if not cmp_df.empty:
         shown = cmp_df[['Rank', 'Name', 'TotalTime', 'GapToBest', 'Stops',
@@ -598,12 +609,12 @@ def _tab_strategy(laps, session, race_name):
 
         und = undercut_delta(total_laps=int(total_laps_sim),
                              compound_new="HARD", compound_old=start_tire,
-                             base_lap_time=float(base_lap), earlier_by=1)
+                             base_lap_time=float(base_lap), earlier_by=1,
+                             rival_response=float(rival_resp))
         direction = "faster" if und['delta_sec'] < 0 else "slower"
         st.caption(
-            f"Undercut estimate: pitting 1 lap earlier projects "
-            f"**{abs(und['delta_sec']):.1f}s {direction}** "
-            f"(estimated; ignores traffic and rival response)."
+            f"Undercut estimate (incl. rival response): pitting 1 lap earlier "
+            f"projects **{abs(und['delta_sec']):.1f}s {direction}** (estimated)"
         )
     else:
         st.info("Not enough laps to compare scenarios.")
