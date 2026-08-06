@@ -142,12 +142,31 @@ class TestRaceStrategySimulator:
 
     def test_two_stop_is_sometimes_faster(self):
         """Test that 2-stop can be faster on high-deg tracks."""
-        # Many laps and high deg (via HARD compound simulation)
+        # Many laps long and high deg (via HARD compound simulation)
         sim = RaceStrategySimulator(base_lap_time=90.0, total_laps=70)
         result = sim.predict_strategy('VER', 'HARD')
         # Both strategies should give valid results
         assert isinstance(result['recommended'], str)
 
+    def test_one_stop_includes_pit_loss(self, simulator):
+        """A 1-stop strategy must pay for its single pit stop."""
+        result = simulator.predict_strategy('VER', 'SOFT')
+        expected = (
+            simulator._simulate_stint('SOFT', 0, simulator.total_laps)
+            + simulator.pit_loss
+        )
+        assert result['1_stop_time'] == pytest.approx(expected)
+
+    def test_two_stop_includes_two_pit_losses(self, simulator):
+        """A 2-stop strategy must pay for both pit stops."""
+        result = simulator.predict_strategy('VER', 'SOFT')
+        stop_lap = simulator.total_laps // 2
+        expected = (
+            simulator._simulate_stint('SOFT', 0, stop_lap)
+            + simulator._simulate_stint('MEDIUM', stop_lap, simulator.total_laps)
+            + 2 * simulator.pit_loss
+        )
+        assert result['2_stop_time'] == pytest.approx(expected)
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

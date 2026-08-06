@@ -48,15 +48,15 @@ class RaceStrategySimulator:
         """
         Predict optimal strategy and finish time.
         """
-        # Try 1-stop
-        t_1stop = self._simulate_stint(start_tire, current_lap, self.total_laps)
-        
-        # Try 2-stop (simplified split)
+        # 1-stop: a single stint on the starting compound + one pit stop
+        t_1stop = self._simulate_stint(start_tire, current_lap, self.total_laps) + self.pit_loss
+
+        # 2-stop (simplified split): two stints + two pit stops
         stop_lap = current_lap + (self.total_laps - current_lap) // 2
         t_2stop_s1 = self._simulate_stint(start_tire, current_lap, stop_lap)
-        t_2stop_s2 = self._simulate_stint('MEDIUM', stop_lap, self.total_laps) # Assume switch to Med
-        t_2stop = t_2stop_s1 + t_2stop_s2 + self.pit_loss
-        
+        t_2stop_s2 = self._simulate_stint('MEDIUM', stop_lap, self.total_laps)  # Assume switch to Med
+        t_2stop = t_2stop_s1 + t_2stop_s2 + 2 * self.pit_loss
+
         return {
             '1_stop_time': t_1stop,
             '2_stop_time': t_2stop,
