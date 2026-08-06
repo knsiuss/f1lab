@@ -17,7 +17,14 @@ from typing import Dict, List, Optional
 import pandas as pd
 import plotly.graph_objects as go
 
-from config import TEAM_COLORS
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from config import TEAM_COLORS
+except ImportError:
+    from .config import TEAM_COLORS
 
 
 def positions_by_lap(
