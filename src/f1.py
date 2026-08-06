@@ -95,6 +95,10 @@ def main():
     pg = st.navigation({
         "F1 Lab": [
             st.Page("pages/1_Home.py", title="Dashboard", default=True),
+            st.Page("pages/2_HeadToHead.py", title="Head-to-Head & Season"),
+            st.Page("pages/3_Predictor.py", title="Predictor & Fantasy"),
+            st.Page("pages/4_Report.py", title="Weekend Report"),
+            st.Page("pages/5_Replay.py", title="Live & Replay"),
             st.Page("pages/6_Analysis.py", title="Analysis Center"),
         ]
     })

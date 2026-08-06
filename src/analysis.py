@@ -244,3 +244,152 @@ def calculate_teammate_comparison(df: pd.DataFrame) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Error calculating teammate comparison: {e}")
         return pd.DataFrame()
+
+
+def _race_order(df: pd.DataFrame) -> list:
+    """Chronological race order from file layout (first-appearance order).
+
+    The season CSVs are grouped by track in calendar order, so first-appearance
+    order of the Track column is a reliable race sequence without needing dates.
+    """
+    if 'Track' not in df.columns:
+        return []
+    return list(dict.fromkeys(df['Track'].dropna().astype(str).tolist()))
+
+
+def calculate_matchup(df: pd.DataFrame, driver1: str, driver2: str):
+    """Head-to-head record between two drivers across their shared races.
+
+    Finishing position is used as the race comparison; Starting Grid stands in
+    for the qualifying comparison. Returns a dict with per-track ``details``
+    (DataFrame) and a ``summary`` dict, or ``None`` when the pair shares no races.
+    """
+    if df is None or df.empty or 'Driver' not in df.columns or 'Track' not in df.columns:
+        return None
+
+    d1 = df[df['Driver'] == driver1]
+    d2 = df[df['Driver'] == driver2]
+
+    order = _race_order(df)
+    common = set(d1['Track']) & set(d2['Track'])
+    tracks = [t for t in order if t in common]
+    if not tracks:
+        return None
+
+    rows = []
+    race_w1 = race_w2 = quali_w1 = quali_w2 = 0
+    for track in tracks:
+        r1 = d1[d1['Track'] == track].iloc[0]
+        r2 = d2[d2['Track'] == track].iloc[0]
+
+        p1 = pd.to_numeric(r1.get('Position'), errors='coerce')
+        p2 = pd.to_numeric(r2.get('Position'), errors='coerce')
+        g1 = pd.to_numeric(r1.get('Starting Grid'), errors='coerce')
+        g2 = pd.to_numeric(r2.get('Starting Grid'), errors='coerce')
+        pts1 = pd.to_numeric(r1.get('Points'), errors='coerce')
+        pts2 = pd.to_numeric(r2.get('Points'), errors='coerce')
+        pts1 = float(pts1) if pd.notna(pts1) else 0.0
+        pts2 = float(pts2) if pd.notna(pts2) else 0.0
+
+        if pd.notna(p1) and pd.notna(p2):
+            if p1 < p2:
+                race_w1 += 1
+            elif p2 < p1:
+                race_w2 += 1
+        if pd.notna(g1) and pd.notna(g2):
+            if g1 < g2:
+                quali_w1 += 1
+            elif g2 < g1:
+                quali_w2 += 1
+
+        rows.append({
+            'Track': track,
+            driver1: p1, driver2: p2,
+            f'{driver1} Grid': g1, f'{driver2} Grid': g2,
+            f'{driver1} Pts': pts1, f'{driver2} Pts': pts2,
+        })
+
+    details = pd.DataFrame(rows)
+    return {
+        'details': details,
+        'summary': {
+            'driver1': driver1,
+            'driver2': driver2,
+            'races_together': len(tracks),
+            'race_record': {'driver1': race_w1, 'driver2': race_w2},
+            'quali_record': {'driver1': quali_w1, 'driver2': quali_w2},
+            'points': {
+                'driver1': int(details[f'{driver1} Pts'].sum()),
+                'driver2': int(details[f'{driver2} Pts'].sum()),
+            },
+            'avg_position': {
+                'driver1': round(details[driver1].mean(), 2),
+                'driver2': round(details[driver2].mean(), 2),
+            },
+        },
+    }
+
+
+def calculate_form_trend(df: pd.DataFrame, drivers: list, window: int = 3) -> dict:
+    """Rolling-average finishing position ("form") plus per-race positions.
+
+    Returns a dict with ``form`` (driver x race, rolling mean position, lower is
+    better) and ``positions`` (driver x race finishing position), both indexed by
+    race name in chronological order.
+    """
+    empty = {'form': pd.DataFrame(), 'positions': pd.DataFrame()}
+    if df is None or df.empty or 'Driver' not in df.columns:
+        return empty
+
+    order = _race_order(df)
+    idx = {t: i for i, t in enumerate(order)}
+    series = {}
+    positions = {}
+
+    for d in drivers:
+        dd = df[df['Driver'] == d].copy()
+        dd['_pos'] = pd.to_numeric(dd['Position'], errors='coerce')
+        dd['_ord'] = dd['Track'].map(idx)
+        dd = dd.dropna(subset=['_pos', '_ord']).sort_values('_ord')
+        if dd.empty:
+            continue
+        keyed = dd.set_index('_ord')
+        series[d] = keyed['_pos'].rolling(window, min_periods=1).mean()
+        positions[d] = keyed['_pos']
+
+    def relabel(frame: pd.DataFrame) -> pd.DataFrame:
+        labels = [order[int(i)] if int(i) < len(order) else int(i) for i in frame.index]
+        frame = frame.copy()
+        frame.index = labels
+        return frame
+
+    form = relabel(pd.DataFrame(series)).round(2)
+    return {'form': form, 'positions': relabel(pd.DataFrame(positions))}
+
+
+def calculate_points_trajectory(df: pd.DataFrame, drivers: list) -> pd.DataFrame:
+    """Cumulative championship points per driver across the season.
+
+    Returns a DataFrame indexed by race name (chronological) with one column per
+    driver holding their running season total.
+    """
+    if df is None or df.empty or 'Driver' not in df.columns:
+        return pd.DataFrame()
+
+    order = _race_order(df)
+    idx = {t: i for i, t in enumerate(order)}
+    series = {}
+
+    for d in drivers:
+        dd = df[df['Driver'] == d].copy()
+        dd['_pts'] = pd.to_numeric(dd['Points'], errors='coerce').fillna(0)
+        dd['_ord'] = dd['Track'].map(idx)
+        dd = dd.dropna(subset=['_ord']).sort_values('_ord')
+        if dd.empty:
+            continue
+        series[d] = dd.set_index('_ord')['_pts'].cumsum()
+
+    traj = pd.DataFrame(series)
+    labels = [order[int(i)] if int(i) < len(order) else int(i) for i in traj.index]
+    traj.index = labels
+    return traj.round(1)
