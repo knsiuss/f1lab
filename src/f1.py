@@ -16,7 +16,7 @@ import sys
 # Ensure src/ is on the path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import STREAMLIT_CONFIG, TEAM_COLORS, FASTF1_CONFIG, _ensure_dirs
+from config import STREAMLIT_CONFIG, FASTF1_CONFIG, _ensure_dirs
 from shared import (
     load_race_data, get_total_points_combined,
     setup_fastf1_cache
@@ -44,7 +44,7 @@ st.set_page_config(
 
 # Initialize session state
 if 'selected_year' not in st.session_state:
-    st.session_state.selected_year = 2025
+    st.session_state.selected_year = FASTF1_CONFIG.default_year
 if 'driver_profile_selection' not in st.session_state:
     st.session_state.driver_profile_selection = None
 if 'team_profile_selection' not in st.session_state:

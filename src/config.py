@@ -7,11 +7,17 @@ Application constants and configuration.
 :license: MIT
 """
 
-import os
+import sys
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+# Ensure src/ is importable no matter how this module is reached
+# (as `config` from a page, or as `src.config` from the test suite).
+sys.path.insert(0, str(Path(__file__).parent))
+
+from seasons import discover_available_years  # noqa: E402
 
 # Path Configuration
 
@@ -62,6 +68,29 @@ class FastF1Config:
         return list(range(self.min_supported_year, self.max_supported_year + 1))
 
 FASTF1_CONFIG = FastF1Config()
+
+
+def _apply_season_discovery() -> None:
+    """Derive season defaults from the CSVs actually present in data/.
+
+    Seasons are discovered rather than hardcoded: dropping a
+    Formula1_{year}Season_RaceResults.csv file into data/ is all it takes to
+    opt the app into that year. We fall back to a seed of 2025 when the data
+    directory is empty (e.g. a fresh checkout before CSVs are placed).
+    """
+    years = discover_available_years(DATA_DIR)
+    if years:
+        FASTF1_CONFIG.default_year = years[-1]
+        # The API still supports later seasons once their data is present.
+        FASTF1_CONFIG.max_supported_year = max(
+            FASTF1_CONFIG.max_supported_year, years[-1]
+        )
+    else:
+        FASTF1_CONFIG.default_year = 2025
+        FASTF1_CONFIG.max_supported_year = 2025
+
+
+_apply_season_discovery()
 
 # F1 2025 SEASON DATA
 
