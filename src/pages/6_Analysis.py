@@ -18,6 +18,8 @@ from fastf1_extended import (
     get_detailed_pit_analysis, get_best_sectors
 )
 from model import RaceStrategySimulator
+from pace import normalised_pace_by_stint, long_run_quality
+from whatif import Scenario, compare_scenarios, undercut_delta
 import fastf1
 from datetime import timedelta
 
@@ -384,6 +386,43 @@ def _tab_pace(laps, session, race_name):
                             tickfont=dict(size=11, color=TEXT_SECONDARY))
     show_plotly_chart(fig_battle)
 
+    # Normalised pace & data quality (Data Honesty: estimated + sample size)
+    st.markdown("---")
+    st.subheader("Normalised Pace & Data Quality (estimated)")
+    st.caption(
+        "Pace is normalised for tyre age (linear fit of lap time vs tyre life). "
+        "Every figure is flagged estimated with a confidence level derived from "
+        "the number of clean laps behind it; short samples are marked low rather "
+        "than presented as fact."
+    )
+    npace = normalised_pace_by_stint(laps)
+    if npace.empty:
+        st.info("Not enough clean lap data to normalise pace.")
+    else:
+        ncols = [c for c in ['Driver', 'Stint', 'Compound', 'N', 'MeanPace',
+                             'BasePace', 'DegPerLap', 'Level', 'Confidence']
+                 if c in npace.columns]
+        nshow = npace[ncols].copy()
+        nshow = nshow.rename(columns={
+            'N': 'Laps', 'MeanPace': 'Mean pace (s)',
+            'BasePace': 'Base pace (s, est)', 'DegPerLap': 'Deg/lap (s, est)',
+            'Level': 'Quality', 'Confidence': 'Confidence',
+        })
+        st.dataframe(nshow, use_container_width=True, hide_index=True)
+
+    lr = long_run_quality(laps)
+    if not lr.empty:
+        st.markdown("##### Representative Long Runs")
+        lcols = [c for c in ['Driver', 'Stint', 'Compound', 'Length', 'MeanPace',
+                             'DegPerLap', 'Level', 'Confidence'] if c in lr.columns]
+        lshow = lr[lcols].copy()
+        lshow = lshow.rename(columns={
+            'Length': 'Laps', 'MeanPace': 'Mean pace (s)',
+            'DegPerLap': 'Deg/lap (s, est)', 'Level': 'Quality',
+            'Confidence': 'Confidence',
+        })
+        st.dataframe(lshow, use_container_width=True, hide_index=True)
+
 
 # TAB 2: STRATEGY & STINTS
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -528,6 +567,46 @@ def _tab_strategy(laps, session, race_name):
         with s2: st.metric("2-Stop Total", f"{strategy['2_stop_time']:.1f}s")
         with s3: st.metric("Delta", f"{strategy['delta']:.1f}s")
         st.success(f"Recommended strategy: **{strategy['recommended']}**")
+
+    st.markdown("---")
+    st.subheader("Scenario Comparison (estimated)")
+    st.caption(
+        "Ranked race-time projection across candidate strategies. Times are "
+        "estimates built on explicit assumptions (tyre degradation, fuel burn, "
+        "pit loss); the fastest is only the fastest under those assumptions, "
+        "not a recommendation."
+    )
+    mid = int(total_laps_sim) // 2
+    scenarios = [
+        Scenario(name=f"{start_tire}->HARD @ L{mid}",
+                 compounds=[start_tire, "HARD"], stop_laps=[mid]),
+        Scenario(name=f"{start_tire}->HARD @ L{mid - 3}",
+                 compounds=[start_tire, "HARD"], stop_laps=[max(1, mid - 3)]),
+        Scenario(name=f"{start_tire}->MEDIUM->HARD",
+                 compounds=[start_tire, "MEDIUM", "HARD"],
+                 stop_laps=[mid // 2, mid]),
+    ]
+    cmp_df = compare_scenarios(
+        scenarios, total_laps=int(total_laps_sim), base_lap_time=float(base_lap)
+    )
+    if not cmp_df.empty:
+        shown = cmp_df[['Rank', 'Name', 'TotalTime', 'GapToBest', 'Stops',
+                        'Risk', 'Confidence']].copy()
+        shown.columns = ['Rank', 'Scenario', 'Time (s, est)', 'Gap (s, est)',
+                         'Stops', 'Risk', 'Confidence']
+        st.dataframe(shown, use_container_width=True, hide_index=True)
+
+        und = undercut_delta(total_laps=int(total_laps_sim),
+                             compound_new="HARD", compound_old=start_tire,
+                             base_lap_time=float(base_lap), earlier_by=1)
+        direction = "faster" if und['delta_sec'] < 0 else "slower"
+        st.caption(
+            f"Undercut estimate: pitting 1 lap earlier projects "
+            f"**{abs(und['delta_sec']):.1f}s {direction}** "
+            f"(estimated; ignores traffic and rival response)."
+        )
+    else:
+        st.info("Not enough laps to compare scenarios.")
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
