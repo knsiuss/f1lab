@@ -40,7 +40,7 @@
 
 ###  Race Replay
 - **Animated Visualization** — Watch races unfold on track
-- **Desktop Player** — Smooth 60fps Arcade-based replay
+- **Browser Replay** — Animated position replay with Play/Pause (FastF1)
 - **Live Leaderboard** — Real-time position updates
 - **Driver Selection** — Click to focus on any driver
 
@@ -93,7 +93,7 @@ f1lab/
 │   ├── qualifying_viz.py   # Qualifying charts
 │   ├── race_replay_data.py # Replay data processing
 │   ├── race_replay_viz.py  # Replay visualizations
-│   ├── arcade_replay_window.py # Desktop replay player
+│   ├── replay.py           # Animated position replay
 │   ├── home.py             # Homepage component
 │   └── evaluate.py         # Model evaluation
 ├── data/                   # Season datasets
@@ -119,7 +119,7 @@ f1lab/
 | **Frontend** | Streamlit, Plotly, Matplotlib |
 | **Data Processing** | Pandas, NumPy |
 | **F1 Data** | FastF1 API |
-| **Visualization** | Plotly Express, Arcade |
+| **Visualization** | Plotly, Plotly Express |
 | **Machine Learning** | Scikit-learn |
 | **Deployment** | Docker, GitHub Actions |
 

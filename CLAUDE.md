@@ -66,5 +66,5 @@ src/
 ## Dependencies
 
 ```
-pandas, numpy, streamlit, fastf1, plotly, matplotlib, arcade
+pandas, numpy, streamlit, fastf1, plotly, matplotlib
 ```

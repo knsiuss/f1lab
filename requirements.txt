@@ -11,6 +11,3 @@ streamlit>=1.36.0
 
 # F1 data
 fastf1>=3.0.0
-
-# Desktop replay window
-arcade>=3.0.0
