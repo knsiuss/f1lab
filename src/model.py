@@ -8,9 +8,20 @@ Race strategy simulation tools.
 :license: MIT
 """
 
+import sys
 import logging
+from pathlib import Path
+
+# Ensure src/ is importable no matter how this module is reached
+# (as `model` from a page, or as `src.model` from the test suite).
+sys.path.insert(0, str(Path(__file__).parent))
+
+from config import MODEL_CONFIG
 
 logger = logging.getLogger(__name__)
+
+# Physics knobs live in config.MODEL_CONFIG so they can be tuned in one place.
+_DEGRADATION_RATES = MODEL_CONFIG['degradation_rates']
 
 
 def calculate_degradation_curve(compound: str) -> float:
@@ -19,30 +30,30 @@ def calculate_degradation_curve(compound: str) -> float:
     Returns the degradation factor (s/lap).
     """
     c = str(compound).upper()
-    if 'SOFT' in c: return 0.12   # High deg
-    if 'MEDIUM' in c: return 0.08 # Medium deg
-    if 'HARD' in c: return 0.04   # Low deg
-    if 'INTER' in c: return 0.05
-    if 'WET' in c: return 0.05
-    return 0.08
+    for key, rate in _DEGRADATION_RATES.items():
+        if key != 'DEFAULT' and key in c:
+            return rate
+    return _DEGRADATION_RATES['DEFAULT']
 
 
 def calculate_fuel_correction(current_lap: int, total_laps: int) -> float:
     """
     Calculate time gained due to fuel burn (seconds).
     Returns negative time delta (time gained) relative to heavy start.
-    Avg gain ~0.06s per lap driven.
+    Avg gain ~0.06s per lap driven (see config.MODEL_CONFIG).
     """
-    return float(current_lap) * -0.06
+    return float(current_lap) * MODEL_CONFIG['fuel_gain_per_lap']
 
 
 class RaceStrategySimulator:
     """Race strategy optimizer using tyre degradation and fuel models."""
-    
-    def __init__(self, base_lap_time: float = 90.0, total_laps: int = 57):
+
+    def __init__(self,
+                 base_lap_time: float = MODEL_CONFIG['default_base_lap_time'],
+                 total_laps: int = MODEL_CONFIG['default_total_laps']):
         self.base_lap_time = base_lap_time
         self.total_laps = total_laps
-        self.pit_loss = 22.0 # Avg pit loss in seconds
+        self.pit_loss = MODEL_CONFIG['pit_loss_sec']  # Avg pit loss in seconds
         
     def predict_strategy(self, driver: str, start_tire: str, current_lap: int = 0) -> dict:
         """
@@ -92,8 +103,8 @@ class RaceStrategySimulator:
         
         for i in range(laps_remaining):
             # Relative pace (neg = chaser faster)
-            # Simplified: Assume chaser has fresher tires (-0.5s avg advantage)
-            pace_delta = -0.5 + (deg_chaser * i) - (deg_leader * i)
+            # Simplified: assume chaser has fresher tyres (see config).
+            pace_delta = MODEL_CONFIG['fresh_tyre_advantage'] + (deg_chaser * i) - (deg_leader * i)
             current_gap += pace_delta
             
             if current_gap <= 0:

@@ -499,6 +499,30 @@ class StreamlitConfig:
 
 STREAMLIT_CONFIG = StreamlitConfig()
 
+# STRATEGY SIMULATION MODEL CONFIGURATION
+
+# Central place to tune the physics knobs used by the strategy simulator in
+# model.py. Kept as data so behaviour is adjustable without editing code.
+MODEL_CONFIG: Dict[str, object] = {
+    # Per-lap time loss (seconds) due to tyre wear, by compound.
+    'degradation_rates': {
+        'SOFT': 0.12,    # High deg
+        'MEDIUM': 0.08,  # Medium deg
+        'HARD': 0.04,    # Low deg
+        'INTER': 0.05,
+        'WET': 0.05,
+        'DEFAULT': 0.08,
+    },
+    # Lap-over-lap time gain from fuel burn (negative = faster). Avg ~0.06s.
+    'fuel_gain_per_lap': -0.06,
+    # Average time lost in the pits (seconds).
+    'pit_loss_sec': 22.0,
+    'default_base_lap_time': 90.0,
+    'default_total_laps': 57,
+    # Relative per-lap pace advantage of a chaser on fresher tyres (seconds).
+    'fresh_tyre_advantage': -0.5,
+}
+
 # DRIVER DATA MERGE
 
 # Merge detailed stats into main profiles

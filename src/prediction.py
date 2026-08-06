@@ -123,10 +123,14 @@ def predict_race(df: Optional[pd.DataFrame], grid: Dict[str, int]) -> pd.DataFra
         if df is not None and 'Team' in df.columns else {}
     )
 
+    # Normalize the grid advantage to the actual field size rather than a
+    # fixed 20, so a reduced field (or any number of entrants) scales the
+    # same way a full grid does.
+    field = max(1, len(grid))
     rows = []
     for d, g in grid.items():
         grid_pos = max(1, int(g))
-        grid_adv = max(0.0, 1.0 - (grid_pos - 1) / 20.0)
+        grid_adv = max(0.0, 1.0 - (grid_pos - 1) / field)
         team = team_map.get(d, '')
         pace = team_pace.get(team, 0.5)
         fm = form.get(d, 0.5)
