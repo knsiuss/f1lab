@@ -10,7 +10,10 @@ import logging
 from pathlib import Path
 
 # Local imports
-from config import TEAM_COLORS, DRIVER_PROFILES, STREAMLIT_CONFIG, SOCIAL_MEDIA_CONFIG, DATA_FILES, DATA_DIR
+from config import (
+    TEAM_COLORS, DRIVER_PROFILES, STREAMLIT_CONFIG,
+    SOCIAL_MEDIA_CONFIG, DATA_DIR, FASTF1_CONFIG,
+)
 from season_config import get_season_calendar, get_completed_races, get_race_names
 from loader import load_data as load_csv_data, clean_data, load_combined_data
 
@@ -24,10 +27,10 @@ def render_header():
     st.markdown('<p class="sub-header">Analytics | Telemetry | Predictions</p>', unsafe_allow_html=True)
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl)
 def load_race_data(year):
     try:
-        data_dir = str(Path(DATA_FILES.race_results).parent)
+        data_dir = str(DATA_DIR)
         race_path = str(Path(data_dir) / f'Formula1_{year}Season_RaceResults.csv')
         sprint_path = str(Path(data_dir) / f'Formula1_{year}Season_SprintResults.csv')
 
@@ -61,10 +64,10 @@ def load_race_data(year):
             return None
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl)
 def load_sprint_data(year):
     try:
-        data_dir = str(Path(DATA_FILES.race_results).parent)
+        data_dir = str(DATA_DIR)
         sprint_file = str(Path(data_dir) / f'Formula1_{year}Season_SprintResults.csv')
         df = load_csv_data(sprint_file)
         if df is not None:
@@ -74,7 +77,7 @@ def load_sprint_data(year):
         return None
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl)
 def get_total_points_combined(year):
     """Calculate total points (race + sprint) for all drivers."""
     total_points_combined = {}
@@ -107,7 +110,7 @@ def get_total_points_combined(year):
     return total_points_combined, total_laps_all, total_all_points
 
 
-@st.cache_resource(ttl=3600)
+@st.cache_resource(ttl=STREAMLIT_CONFIG.cache_ttl)
 def load_fastf1_session(year: int, race: str, session_type: str, load_telemetry: bool = False):
     """Load FastF1 session with caching and optional telemetry."""
     try:
@@ -122,7 +125,7 @@ def load_fastf1_session(year: int, race: str, session_type: str, load_telemetry:
         return None
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl)
 def get_real_grid_positions(year: int, race: str) -> dict:
     """Fetch actual Qualifying grid positions from FastF1."""
     try:
@@ -214,7 +217,7 @@ def format_f1_time(td: pd.Timedelta) -> str:
 
 
 def setup_fastf1_cache():
-    cache_dir = Path("./f1_cache")
+    cache_dir = FASTF1_CONFIG.cache_dir
     cache_dir.mkdir(exist_ok=True)
     fastf1.Cache.enable_cache(str(cache_dir))
     return cache_dir

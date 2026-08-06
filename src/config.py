@@ -38,15 +38,8 @@ def _ensure_dirs():
 
 # DATA FILE PATHS
 
-@dataclass
-class DataFiles:
-    """Data file path configuration."""
-    race_results: Path = DATA_DIR / 'Formula1_2025Season_RaceResults.csv'
-    qualifying_results: Path = DATA_DIR / 'Formula1_2025Season_QualifyingResults.csv'
-    sprint_results: Path = DATA_DIR / 'Formula1_2025Season_SprintResults.csv'
-    sprint_qualifying: Path = DATA_DIR / 'Formula1_2025Season_SprintQualifyingResults.csv'
-
-DATA_FILES = DataFiles()
+# Season data files are located dynamically per year (see shared.load_race_data
+# and loader), so there is no per-year filename config here.
 
 # FASTF1 CONFIGURATION
 
