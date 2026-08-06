@@ -17,6 +17,7 @@ src/
   shared.py                 # Shared utilities (data loading, cache, helpers)
   season_config.py          # Dynamic calendar via FastF1 API + fallbacks
   config.py                 # Static data: teams, drivers, profiles (2025)
+  seasons.py                # Season discovery from data/ (discover_available_years)
   loader.py                 # CSV loading + cleaning
   analysis.py               # Stats aggregation
   model.py                  # Race strategy simulator
@@ -32,20 +33,16 @@ src/
 ## Multi-Season Support
 
 - **Sidebar selector**: `st.session_state.selected_year` (set in `f1.py`)
+- **Season discovery**: `seasons.discover_available_years(data_dir)` scans `data/Formula1_{year}Season_RaceResults.csv`; `config.py` derives `FASTF1_CONFIG.default_year` and `max_supported_year` from it (falls back to seed 2025 if `data/` is empty)
 - **Calendar**: `season_config.get_completed_races(year)` -- fetches live from FastF1, cached in-memory
 - **CSV naming**: `Formula1_{year}Season_RaceResults.csv` -- year injected dynamically
 - **FastF1 sessions**: Always pass `st.session_state.selected_year` as first arg
-- **Fallback**: `config.py` + `season_config.py` have hardcoded 2025 data when FastF1 API is unavailable
+- **Fallback**: `season_config.FALLBACK_CALENDARS` (keyed by year) used when FastF1 API is unavailable
 
 ### Adding a new season (e.g. 2026)
-1. Place CSV files in `data/Formula1_2026Season_*.csv`
-2. Add fallback calendar to `season_config.py`
+1. Place CSV files in `data/Formula1_2026Season_*.csv` -- the app auto-detects the new year
+2. Add a fallback calendar entry to `season_config.py` `FALLBACK_CALENDARS` (optional; only used offline)
 3. Add teams/drivers to `config.py` (`F1_2026_TEAMS`, `DRIVER_PROFILES`, `DRIVER_DETAILS`)
-4. Update `max_supported_year` in `config.py`
-1. Place CSV files in `data/Formula1_2027Season_*.csv`
-2. Add fallback calendar to `season_config.py`
-3. Add teams/drivers to `config.py` (`F1_2027_TEAMS`, `DRIVER_PROFILES`, `DRIVER_DETAILS`)
-4. Update `max_supported_year` in `config.py`
 
 ## Performance Optimizations
 
