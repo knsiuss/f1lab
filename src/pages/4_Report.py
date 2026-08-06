@@ -2,13 +2,17 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 
 from shared import load_race_data, load_fastf1_session
-from config import TEAM_COLORS
+from config import DATA_DIR, TEAM_COLORS
+from loader import load_data as load_csv_data
 from season_config import get_race_names
 from report import build_report
+from prediction import predict_race
+from briefing import pre_race_briefing, post_race_debrief
 
 
 def _session_extras(year, race):
@@ -43,6 +47,33 @@ def _session_extras(year, race):
     except Exception:
         pass
     return extras, sections
+
+
+def _race_grid(year, race, race_df):
+    """Qualifying grid for a race, falling back to the race's Starting Grid."""
+    try:
+        qpath = DATA_DIR / f'Formula1_{year}Season_QualifyingResults.csv'
+        qdf = load_csv_data(str(qpath))
+        if qdf is not None and not qdf.empty and 'Track' in qdf.columns:
+            sub = qdf[qdf['Track'] == race]
+            if not sub.empty and 'Driver' in sub.columns:
+                grid = {}
+                for _, r in sub.iterrows():
+                    g = pd.to_numeric(r.get('Position'), errors='coerce')
+                    if pd.notna(g):
+                        grid[r['Driver']] = int(g)
+                if grid:
+                    return grid
+    except Exception:
+        pass
+
+    sub = race_df[race_df['Track'] == race] if 'Track' in race_df.columns else race_df
+    grid = {}
+    for _, r in sub.iterrows():
+        g = pd.to_numeric(r.get('Starting Grid'), errors='coerce')
+        if pd.notna(g):
+            grid[r['Driver']] = int(g)
+    return grid
 
 
 def _standings_chart_html(df):
@@ -123,6 +154,18 @@ def page():
         )
 
     st.markdown(report_md)
+
+    grid = _race_grid(year, selected_race, race_df)
+    forecast = predict_race(race_df, grid) if grid else None
+
+    with st.expander("Pre-Race Briefing"):
+        if grid:
+            st.markdown(pre_race_briefing(race_df, grid, race=selected_race))
+        else:
+            st.info("No grid available to build a pre-race briefing.")
+
+    with st.expander("Post-Race Debrief"):
+        st.markdown(post_race_debrief(race_df, selected_race, forecast=forecast))
 
     st.markdown("---")
     c1, c2 = st.columns(2)
