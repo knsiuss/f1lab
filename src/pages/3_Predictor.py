@@ -19,6 +19,7 @@ from prediction import (
     compute_driver_prices, optimal_lineup, forecast_vs_actual,
     DEFAULT_BUDGET, DEFAULT_DRIVERS,
 )
+from backtest import walk_forward_backtest, METRICS as BACKTEST_METRICS
 
 
 def _load_grid(year, race, race_df):
@@ -92,7 +93,8 @@ def page():
     prices = compute_driver_prices(race_df)
     predicted = add_price(predicted, prices)
 
-    tabs = st.tabs(["Race Forecast", "Fantasy Team", "Forecast vs Actual"])
+    tabs = st.tabs(["Race Forecast", "Fantasy Team", "Forecast vs Actual",
+                    "Model Accuracy"])
 
     with tabs[0]:
         _tab_forecast(predicted)
@@ -100,6 +102,8 @@ def page():
         _tab_fantasy(predicted)
     with tabs[2]:
         _tab_actual(race_df, selected_race, predicted)
+    with tabs[3]:
+        _tab_backtest(race_df)
 
 
 def _tab_forecast(predicted):
@@ -197,6 +201,54 @@ def _tab_actual(race_df, selected_race, predicted):
     disp = joined[['Predicted', 'Driver', 'Grid', 'Actual', 'PredictedPts', 'ActualPts']].copy()
     disp.columns = ['Pred', 'Driver', 'Grid', 'Actual', 'Pred Pts', 'Actual Pts']
     st.dataframe(disp, use_container_width=True, hide_index=True)
+
+
+def _tab_backtest(race_df):
+    st.markdown("### Model Accuracy &mdash; Walk-Forward Backtest")
+    st.caption(
+        "Each race is scored with the model trained only on the races before it "
+        "(no look-ahead, no leakage). The baseline is deliberately naive: "
+        "&ldquo;the finishing order equals the grid order.&rdquo; All figures are "
+        "estimated and cover only the races with enough history to score."
+    )
+
+    per_race, summary = walk_forward_backtest(race_df)
+    if summary['n_races'] == 0:
+        st.info("Not enough completed races to backtest.")
+        return
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Races backtested", summary['n_races'])
+    m2.metric("Races skipped (insufficient)", summary['n_races_skipped'])
+    m3.metric("Spearman vs baseline",
+              f"{summary.get('spearman_model')} vs {summary.get('spearman_baseline')}")
+
+    labels = {
+        'exact_match_rate': 'Exact position hits',
+        'mae': 'Position MAE (lower = better)',
+        'spearman': 'Spearman rank correlation',
+        'podium_overlap': 'Podium overlap (top 3)',
+        'points_mae': 'Fantasy points MAE',
+    }
+    rows = []
+    for metric in BACKTEST_METRICS:
+        rows.append({
+            'Metric': labels.get(metric, metric),
+            'Model': summary.get(f'{metric}_model'),
+            'Baseline (grid)': summary.get(f'{metric}_baseline'),
+            'Model better (races)': summary.get(f'{metric}_model_beats_baseline'),
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    st.markdown("##### Per-race detail")
+    detail_cols = [c for c in
+                   ['Race', 'N', 'mae_model', 'mae_baseline', 'spearman_model',
+                    'spearman_baseline', 'Estimated']
+                   if c in per_race.columns]
+    show = per_race[detail_cols].copy()
+    show.columns = ['Race', 'Drivers', 'MAE (model)', 'MAE (grid)',
+                    'Spearman (model)', 'Spearman (grid)', 'Estimated']
+    st.dataframe(show, use_container_width=True, hide_index=True)
 
 
 page()
