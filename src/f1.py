@@ -100,6 +100,7 @@ def main():
             st.Page("pages/4_Report.py", title="Weekend Report"),
             st.Page("pages/5_Replay.py", title="Live & Replay"),
             st.Page("pages/6_Analysis.py", title="Analysis Center"),
+            st.Page("pages/7_Competitor.py", title="Competitor Analysis"),
         ]
     })
     pg.run()
