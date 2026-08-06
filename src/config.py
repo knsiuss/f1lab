@@ -10,7 +10,7 @@ Application constants and configuration.
 import sys
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from dataclasses import dataclass
 
 # Ensure src/ is importable no matter how this module is reached
@@ -91,42 +91,6 @@ def _apply_season_discovery() -> None:
 
 
 _apply_season_discovery()
-
-# F1 2025 SEASON DATA
-
-# Official 2025 F1 Calendar
-F1_2025_CALENDAR: List[Dict] = [
-    {'round': 1, 'name': 'Australian Grand Prix', 'location': 'Melbourne', 'country': 'Australia'},
-    {'round': 2, 'name': 'Chinese Grand Prix', 'location': 'Shanghai', 'country': 'China'},
-    {'round': 3, 'name': 'Japanese Grand Prix', 'location': 'Suzuka', 'country': 'Japan'},
-    {'round': 4, 'name': 'Bahrain Grand Prix', 'location': 'Sakhir', 'country': 'Bahrain'},
-    {'round': 5, 'name': 'Saudi Arabian Grand Prix', 'location': 'Jeddah', 'country': 'Saudi Arabia'},
-    {'round': 6, 'name': 'Miami Grand Prix', 'location': 'Miami', 'country': 'USA'},
-    {'round': 7, 'name': 'Emilia Romagna Grand Prix', 'location': 'Imola', 'country': 'Italy'},
-    {'round': 8, 'name': 'Monaco Grand Prix', 'location': 'Monte Carlo', 'country': 'Monaco'},
-    {'round': 9, 'name': 'Spanish Grand Prix', 'location': 'Barcelona', 'country': 'Spain'},
-    {'round': 10, 'name': 'Canadian Grand Prix', 'location': 'Montreal', 'country': 'Canada'},
-    {'round': 11, 'name': 'Austrian Grand Prix', 'location': 'Spielberg', 'country': 'Austria'},
-    {'round': 12, 'name': 'British Grand Prix', 'location': 'Silverstone', 'country': 'Great Britain'},
-    {'round': 13, 'name': 'Belgian Grand Prix', 'location': 'Spa', 'country': 'Belgium'},
-    {'round': 14, 'name': 'Hungarian Grand Prix', 'location': 'Budapest', 'country': 'Hungary'},
-    {'round': 15, 'name': 'Dutch Grand Prix', 'location': 'Zandvoort', 'country': 'Netherlands'},
-    {'round': 16, 'name': 'Italian Grand Prix', 'location': 'Monza', 'country': 'Italy'},
-    {'round': 17, 'name': 'Azerbaijan Grand Prix', 'location': 'Baku', 'country': 'Azerbaijan'},
-    {'round': 18, 'name': 'Singapore Grand Prix', 'location': 'Marina Bay', 'country': 'Singapore'},
-    {'round': 19, 'name': 'United States Grand Prix', 'location': 'Austin', 'country': 'USA'},
-    {'round': 20, 'name': 'Mexico City Grand Prix', 'location': 'Mexico City', 'country': 'Mexico'},
-    {'round': 21, 'name': 'São Paulo Grand Prix', 'location': 'Interlagos', 'country': 'Brazil'},
-    {'round': 22, 'name': 'Las Vegas Grand Prix', 'location': 'Las Vegas', 'country': 'USA'},
-    {'round': 23, 'name': 'Qatar Grand Prix', 'location': 'Lusail', 'country': 'Qatar'},
-    {'round': 24, 'name': 'Abu Dhabi Grand Prix', 'location': 'Yas Marina', 'country': 'UAE'},
-]
-
-# Dictionary mapping display names to FastF1/Official names
-F1_2025_RACE_NAMES: Dict[str, str] = {r['name']: r['name'] for r in F1_2025_CALENDAR}
-
-# All races are completed as of Dec 2025
-F1_2025_COMPLETED_RACES: List[str] = [r['name'] for r in F1_2025_CALENDAR]
 
 # F1 Points System
 TEAM_COLORS: Dict[str, str] = {
@@ -562,5 +526,6 @@ if __name__ == '__main__':
     print(f"Project Root: {PROJECT_ROOT}")
     print(f"Data Directory: {DATA_DIR}")
     print(f"Cache Directory: {CACHE_DIR}")
-    print(f"2025 Calendar: {len(F1_2025_CALENDAR)} races")
+    print(f"Discovered seasons: {discover_available_years(DATA_DIR)}")
+    print(f"Supported season range: {FASTF1_CONFIG.get_supported_years()}")
     print("\nConfig loaded successfully!")
