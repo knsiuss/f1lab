@@ -187,7 +187,9 @@ def _tab_form(race_df):
     positions = result['positions']
     if not positions.empty and positions.shape[0] > 1:
         st.markdown("##### Finishing Position Heatmap")
-        zmax = max(20, int(pd.to_numeric(positions.values.ravel(), errors='coerce').max()))
+        vals = pd.to_numeric(positions.values.ravel(), errors='coerce')
+        zmax = int(vals.max()) if vals.max() is not None and not pd.isna(vals.max()) else 20
+        zmax = max(20, zmax) if zmax > 0 else 20
         fig2 = go.Figure(go.Heatmap(
             z=positions.T.values, x=positions.index, y=positions.columns,
             colorscale='RdYlGn_r', zmin=1, zmax=zmax,
