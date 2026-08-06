@@ -46,7 +46,7 @@ def _ensure_dirs():
 @dataclass
 class FastF1Config:
     """FastF1 API configuration."""
-    cache_dir: Path = CACHE_DIR
+    cache_dir: Path = PROJECT_ROOT / 'f1_cache'
     default_year: int = 2025
     retry_attempts: int = 3
     retry_delay: float = 1.0

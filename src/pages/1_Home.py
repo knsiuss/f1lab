@@ -4,18 +4,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from shared import load_race_data, show_plotly_chart, format_f1_time
+from shared import load_race_data, show_plotly_chart
 from config import TEAM_COLORS
 from season_config import get_completed_races, get_race_names
 from styles import (
     GRID, LABEL_FONT, TEXT_PRIMARY, TEXT_SECONDARY, TITLE_FONT,
+    podium_color,
     fig_layout as _fig_layout,
 )
-import fastf1
-from datetime import timedelta
 import logging
 
 logger = logging.getLogger(__name__)
@@ -228,14 +225,14 @@ def page():
                     team = r.get('Team', '')
                     pts = int(r['Points'])
                     color = TEAM_COLORS.get(team, '#555')
-                    medal = {1: '#FFD700', 2: '#C0C0C0', 3: '#CD7F32'}.get(pos, 'transparent')
+                    medal = podium_color(pos)
                     medal_icon = {1: '🥇', 2: '🥈', 3: '🥉'}.get(pos, f'#{pos}')
                     st.markdown(f"""
                     <div style="display:flex;align-items:center;gap:12px;padding:6px 8px;
                                 margin:1px 0;border-radius:6px;
                                 background:rgba(255,255,255,0.03);">
                         <span style="font-size:1.1rem;">{medal_icon}</span>
-                        <span style="font-weight:700;color:white;min-width:36px;">{drv}</span>
+                        <span style="font-weight:700;color:{medal if pos <= 3 else 'white'};min-width:36px;">{drv}</span>
                         <span style="font-size:0.8rem;color:#888;flex:1;">{team}</span>
                         <span style="font-weight:600;color:{color};">{pts} pts</span>
                     </div>

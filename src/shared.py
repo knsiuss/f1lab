@@ -1,21 +1,14 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import fastf1
-from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 
 # Local imports
-from config import (
-    TEAM_COLORS, DRIVER_PROFILES, STREAMLIT_CONFIG,
-    SOCIAL_MEDIA_CONFIG, DATA_DIR, FASTF1_CONFIG,
-)
-from season_config import get_season_calendar, get_completed_races, get_race_names
-from loader import load_data as load_csv_data, clean_data, load_combined_data
+from config import STREAMLIT_CONFIG, DATA_DIR, FASTF1_CONFIG
+from loader import load_data as load_csv_data, clean_data
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +66,7 @@ def load_sprint_data(year):
         if df is not None:
             df = clean_data(df)
         return df
-    except Exception as e:
+    except Exception:
         return None
 
 

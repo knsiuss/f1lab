@@ -26,6 +26,21 @@ COMPOUND_COLORS = {
     'INTERMEDIATE': '#43B02A', 'WET': '#0067AD',
 }
 
+# Podium medal colours by finishing position.
+PODIUM_COLORS = {
+    1: '#FFD700',   # Gold
+    2: '#C0C0C0',   # Silver
+    3: '#CD7F32',   # Bronze
+}
+
+
+def podium_color(position) -> str:
+    """Colour for a podium position; 'transparent' for anything else."""
+    try:
+        return PODIUM_COLORS[int(position)]
+    except (TypeError, ValueError, KeyError):
+        return 'transparent'
+
 
 def fig_layout(height=400, **overrides):
     """Base Plotly layout -- consistent across every chart."""
