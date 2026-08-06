@@ -22,93 +22,13 @@ import fastf1
 from datetime import timedelta
 
 
-# â”€â”€ Design System â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-BG_PAPER = "rgba(0,0,0,0)"
-BG_PLOT = "rgba(0,0,0,0)"
-GRID = "rgba(255,255,255,0.05)"
-GRID_EMPH = "rgba(255,255,255,0.1)"
-ZERO_LINE = "rgba(255,255,255,0.15)"
-TEXT_PRIMARY = "#e0e0e0"
-TEXT_SECONDARY = "#888"
-TEXT_DIM = "#555"
-FONT = "Inter, sans-serif"
-TITLE_FONT = dict(family=FONT, size=15, color=TEXT_PRIMARY)
-LABEL_FONT = dict(family=FONT, size=11, color=TEXT_SECONDARY)
-
-COMPOUND_COLORS = {
-    'SOFT': '#FF3333', 'MEDIUM': '#FFD700', 'HARD': '#BBBBBB',
-    'INTERMEDIATE': '#43B02A', 'WET': '#0067AD',
-}
+from styles import (
+    COMPOUND_COLORS, FONT, GRID, LABEL_FONT, TEXT_PRIMARY, TEXT_SECONDARY,
+    TITLE_FONT, ZERO_LINE, fig_layout as _fig_layout,
+    time_axis_layout as _time_axis_layout,
+)
 
 DEFAULT_DRIVERS = 3  # Show fewer drivers by default for clarity
-
-
-# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-def _fig_layout(height=400, **overrides):
-    """Base Plotly layout â€” consistent across every chart."""
-    base = dict(
-        paper_bgcolor=BG_PAPER,
-        plot_bgcolor=BG_PLOT,
-        font=dict(family=FONT, color=TEXT_PRIMARY, size=12),
-        margin=dict(l=55, r=30, t=55, b=50),
-        height=height,
-        hoverlabel=dict(
-            bgcolor="rgba(15,15,25,0.92)",
-            font=dict(family=FONT, size=12, color="white"),
-            bordercolor="rgba(255,255,255,0.15)",
-        ),
-        legend=dict(
-            bgcolor="rgba(0,0,0,0)",
-            font=dict(size=12, color=TEXT_PRIMARY),
-            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-        ),
-        xaxis=dict(showgrid=True, gridcolor=GRID, gridwidth=1,
-                   zerolinecolor=GRID_EMPH, tickfont=dict(size=11, color=TEXT_SECONDARY)),
-        yaxis=dict(showgrid=True, gridcolor=GRID, gridwidth=1,
-                   zerolinecolor=GRID_EMPH, tickfont=dict(size=11, color=TEXT_SECONDARY)),
-    )
-    base.update(overrides)
-    return base
-
-
-def _mmss_ticks(total_seconds_values, prefix=""):
-    """Convert raw seconds array â†’ tickvals/ticktext for mm:ss.s display.
-
-    Returns dict suitable for yaxis update: {tickvals, ticktext}.
-    Useful when the Y-axis is raw seconds but you want labels like '1:30.0'.
-    """
-    vals = sorted(set(int(round(v)) for v in total_seconds_values if pd.notna(v)))
-    ticktext = []
-    for v in vals:
-        m = int(v) // 60
-        s = v % 60
-        ticktext.append(f"{m}:{s:05.2f}")
-    return dict(tickvals=vals, ticktext=ticktext)
-
-
-def _time_axis_layout(label, total_range):
-    """Return yaxis kwargs for a mm:ss formatted time axis.
-
-    total_range: (min_seconds, max_seconds)
-    """
-    mn, mx = total_range
-    # Create ticks every 5 seconds in the range
-    step = 5
-    start = int(mn) // step * step
-    stop = int(mx) // step * step + step + 1
-    tickvals = list(range(start, stop, step))
-    ticktext = [f"{v // 60}:{v % 60:05.2f}" for v in tickvals]
-    return dict(
-        title=dict(text=label, font=LABEL_FONT),
-        tickvals=tickvals,
-        ticktext=ticktext,
-        showgrid=True,
-        gridcolor=GRID,
-        gridwidth=1,
-        zerolinecolor=GRID_EMPH,
-        tickfont=dict(size=11, color=TEXT_SECONDARY),
-    )
-
 
 def page():
     year = st.session_state.get('selected_year', 2025)
