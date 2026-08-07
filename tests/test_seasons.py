@@ -33,3 +33,21 @@ def test_missing_dir_returns_empty(tmp_path):
 
 def test_empty_dir_returns_empty(tmp_path):
     assert discover_available_years(tmp_path) == []
+
+
+def test_supported_years_includes_live_calendar_year(monkeypatch):
+    """The in-progress season is streamable even before its CSVs exist."""
+    import src.config as config
+    monkeypatch.setattr(config, "_current_calendar_year", lambda: 2030)
+    years = config.FASTF1_CONFIG.get_supported_years()
+    assert years[-1] == 2030
+    assert 2030 in years
+
+
+def test_supported_years_respects_data_when_its_latest(monkeypatch):
+    """A season year beyond the current calendar year is still honoured from data."""
+    import src.config as config
+    monkeypatch.setattr(config, "_current_calendar_year", lambda: 2024)
+    # max_supported_year (from data discovery) is 2025, so 2025 remains included.
+    years = config.FASTF1_CONFIG.get_supported_years()
+    assert years[-1] == 2025

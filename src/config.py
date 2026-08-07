@@ -9,6 +9,7 @@ Application constants and configuration.
 
 import sys
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass
@@ -18,6 +19,12 @@ from dataclasses import dataclass
 sys.path.insert(0, str(Path(__file__).parent))
 
 from seasons import discover_available_years  # noqa: E402
+
+
+def _current_calendar_year() -> int:
+    """The year we are in right now; used to stream the in-progress season."""
+    return datetime.now().year
+
 
 # Path Configuration
 
@@ -55,10 +62,16 @@ class FastF1Config:
     # Historical seasons supported by FastF1 API
     min_supported_year: int = 2018
     max_supported_year: int = 2025
-    
+
     def get_supported_years(self) -> list:
-        """Get list of supported historical seasons."""
-        return list(range(self.min_supported_year, self.max_supported_year + 1))
+        """Get list of supported historical seasons (includes the live season).
+
+        Streaming is deliberately inclusive of the in-progress (current calendar)
+        year so FastF1-backed pages can pull sessions online even before that
+        season's result CSVs exist; CSV-backed pages degrade gracefully.
+        """
+        upper = max(self.max_supported_year, _current_calendar_year())
+        return list(range(self.min_supported_year, upper + 1))
 
 FASTF1_CONFIG = FastF1Config()
 

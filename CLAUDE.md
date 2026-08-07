@@ -47,6 +47,7 @@ src/
 
 - **Sidebar selector**: `st.session_state.selected_year` (set in `f1.py`)
 - **Season discovery**: `seasons.discover_available_years(data_dir)` scans `data/Formula1_{year}Season_RaceResults.csv`; `config.py` derives `FASTF1_CONFIG.default_year` and `max_supported_year` from it (falls back to seed 2025 if `data/` is empty)
+- **Live streaming**: `FASTF1_CONFIG.get_supported_years()` is bounded by the current calendar year, so the in-progress season is selectable and its FastF1 session data (Race Analysis page) is pulled online even before that season's result CSVs exist. CSV-backed pages (Dashboard, Predictor, Report, Competitor, Replay) degrade gracefully to "No data available" for years without local CSV results.
 - **Calendar**: `season_config.get_completed_races(year)` -- fetches live from FastF1, cached in-memory
 - **CSV naming**: `Formula1_{year}Season_RaceResults.csv` -- year injected dynamically
 - **FastF1 sessions**: Always pass `st.session_state.selected_year` as first arg
