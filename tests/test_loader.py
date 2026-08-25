@@ -16,7 +16,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.loader import load_data, clean_data, load_combined_data
+from src.loader import load_data, clean_data, load_season_data
 
 
 class TestLoadData:
@@ -37,28 +37,29 @@ class TestLoadData:
         assert df is None
 
 
-class TestLoadCombinedData:
-    """Tests for load_combined_data (year-aware season filenames)."""
+class TestLoadSeasonData:
+    """Tests for load_season_data (year-aware season filenames)."""
 
     def _write(self, tmp_path, year, kind, drivers):
-        csv = "Driver,Points,Position,Starting Grid,Laps\n"
+        csv = "Driver,Points,Position,Starting Grid,Laps,Time/Retired\n"
         for i, d in enumerate(drivers, start=1):
-            csv += f"{d},{25 - (i - 1) * 8},{i},{i},57\n"
+            csv += f"{d},{25 - (i - 1) * 8},{i},{i},57,+2.345\n"
         path = tmp_path / f'Formula1_{year}Season_{kind}Results.csv'
         path.write_text(csv, encoding='utf-8')
 
-    def test_load_combined_data_year_in_filenames(self, tmp_path):
+    def test_load_season_data_year_in_filenames(self, tmp_path):
         """Uses the passed year in the filenames, not a hardcoded season."""
         self._write(tmp_path, 2024, 'Race', ['VER', 'NOR'])
         self._write(tmp_path, 2024, 'Sprint', ['NOR', 'VER'])
-        df = load_combined_data(str(tmp_path), 2024)
+        df = load_season_data(str(tmp_path), 2024)
         assert df is not None
         assert set(df['SessionType']) == {'Race', 'Sprint'}
         assert len(df) == 4
+        assert 'Finished' in df.columns
 
-    def test_load_combined_data_missing_year_returns_none(self, tmp_path):
+    def test_load_season_data_missing_year_returns_none(self, tmp_path):
         """A season with no files returns None rather than falling back to 2025."""
-        assert load_combined_data(str(tmp_path), 2024) is None
+        assert load_season_data(str(tmp_path), 2024) is None
 
 
 class TestCleanData:

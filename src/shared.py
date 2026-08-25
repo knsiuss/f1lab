@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Local imports
 from config import STREAMLIT_CONFIG, DATA_DIR, FASTF1_CONFIG
-from loader import load_data as load_csv_data, clean_data
+from loader import load_data as load_csv_data, clean_data, load_season_data
 
 logger = logging.getLogger(__name__)
 
@@ -22,39 +22,12 @@ def render_header():
 
 @st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl)
 def load_race_data(year):
+    """Cached season loader; the pure logic lives in loader.load_season_data."""
     try:
-        data_dir = str(DATA_DIR)
-        race_path = str(Path(data_dir) / f'Formula1_{year}Season_RaceResults.csv')
-        sprint_path = str(Path(data_dir) / f'Formula1_{year}Season_SprintResults.csv')
-
-        df_race = load_csv_data(race_path)
-        if df_race is None: return None
-        df_race['SessionType'] = 'Race'
-
-        try:
-            df_sprint = load_csv_data(sprint_path)
-            if df_sprint is not None and not df_sprint.empty:
-                df_sprint['SessionType'] = 'Sprint'
-                df = pd.concat([df_race, df_sprint], ignore_index=True)
-            else:
-                df = df_race
-        except:
-            df = df_race
-
-        if df is not None:
-            df = clean_data(df)
-        return df
+        return load_season_data(str(DATA_DIR), year)
     except Exception as e:
-        logger.error(f"Error loading combined data: {e}")
-        try:
-            fallback_path = str(DATA_DIR / f'Formula1_{year}Season_RaceResults.csv')
-            df = load_csv_data(fallback_path)
-            if df is not None:
-                df = clean_data(df)
-            return df
-        except Exception as e2:
-            logger.error(f"Error loading race data: {e2}")
-            return None
+        logger.error(f"Error loading season data for {year}: {e}")
+        return None
 
 
 @st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl)
@@ -98,8 +71,8 @@ def get_total_points_combined(year):
             total_points_combined = race_points.to_dict()
 
         total_all_points = sum(total_points_combined.values())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Could not compute total points for {year}: {e}")
     return total_points_combined, total_laps_all, total_all_points
 
 

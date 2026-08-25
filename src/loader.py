@@ -9,7 +9,6 @@ CSV data loading and preprocessing.
 
 import logging
 import pandas as pd
-import numpy as np
 from typing import Optional
 from pathlib import Path
 
@@ -37,7 +36,7 @@ def load_data(file_path: str) -> Optional[pd.DataFrame]:
         
     except FileNotFoundError:
         logger.error(f"File not found: {file_path}")
-        logger.error(f"Please ensure the file exists at the specified path")
+        logger.error("Please ensure the file exists at the specified path")
         return None
     except PermissionError:
         logger.error(f"Permission denied accessing file: {file_path}")
@@ -101,36 +100,35 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
         logger.exception(f"Error cleaning data: {e}")
         raise
 
-def load_combined_data(data_dir: str, year: int) -> Optional[pd.DataFrame]:
+def load_season_data(data_dir: str, year: int) -> Optional[pd.DataFrame]:
     """
-    Load and combine Race and Sprint results for a season.
+    Load, tag and combine Race and Sprint results for a season (canonical).
+
+    This is the single implementation of season CSV loading;
+    ``shared.load_race_data`` wraps it with Streamlit caching. Raises the same
+    ``ValueError`` as ``clean_data`` when the schema is invalid.
 
     Args:
         data_dir: Directory containing the CSV files.
         year: Season year used in the CSV filenames.
 
     Returns:
-        pd.DataFrame: Combined DataFrame containing both race and sprint results.
+        pd.DataFrame: Cleaned combined DataFrame (race + sprint when present),
+        or None when the race CSV is missing/empty.
     """
-    try:
-        race_path = Path(data_dir) / f'Formula1_{year}Season_RaceResults.csv'
-        sprint_path = Path(data_dir) / f'Formula1_{year}Season_SprintResults.csv'
+    race_path = Path(data_dir) / f'Formula1_{year}Season_RaceResults.csv'
+    sprint_path = Path(data_dir) / f'Formula1_{year}Season_SprintResults.csv'
 
-        df_race = load_data(str(race_path))
-
-        if df_race is None:
-            return None
-
-        df_race['SessionType'] = 'Race'
-
-        if sprint_path.exists():
-            df_sprint = load_data(str(sprint_path))
-            if df_sprint is not None and not df_sprint.empty:
-                df_sprint['SessionType'] = 'Sprint'
-                return pd.concat([df_race, df_sprint], ignore_index=True)
-
-        return df_race
-
-    except Exception as e:
-        logger.error(f"Error loading combined data: {e}")
+    df_race = load_data(str(race_path))
+    if df_race is None:
         return None
+    df_race['SessionType'] = 'Race'
+
+    frames = [df_race]
+    if sprint_path.exists():
+        df_sprint = load_data(str(sprint_path))
+        if df_sprint is not None and not df_sprint.empty:
+            df_sprint['SessionType'] = 'Sprint'
+            frames.append(df_sprint)
+
+    return clean_data(pd.concat(frames, ignore_index=True))
