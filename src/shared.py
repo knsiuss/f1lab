@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 # Local imports
-from config import STREAMLIT_CONFIG, DATA_DIR, FASTF1_CONFIG
+from config import STREAMLIT_CONFIG, DATA_DIR, FASTF1_CONFIG, VIZ_CONFIG
 from loader import load_data as load_csv_data, clean_data, load_season_data
 
 logger = logging.getLogger(__name__)
@@ -150,9 +150,9 @@ def create_gauge(value, max_value, title, color="#E10600"):
             'borderwidth': 2,
             'bordercolor': "white",
             'steps': [
-                {'range': [0, max_value * 0.6], 'color': '#1a1a2e'},
-                {'range': [max_value * 0.6, max_value * 0.85], 'color': '#2a2a4e'},
-                {'range': [max_value * 0.85, max_value], 'color': '#3a3a6e'}
+                {'range': [0, max_value * VIZ_CONFIG['gauge_step_low']], 'color': '#1a1a2e'},
+                {'range': [max_value * VIZ_CONFIG['gauge_step_low'], max_value * VIZ_CONFIG['gauge_step_high']], 'color': '#2a2a4e'},
+                {'range': [max_value * VIZ_CONFIG['gauge_step_high'], max_value], 'color': '#3a3a6e'}
             ],
         },
         number={'font': {'color': 'white'}}

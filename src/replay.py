@@ -22,9 +22,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 try:
-    from config import TEAM_COLORS
+    from config import TEAM_COLORS, VIZ_CONFIG
 except ImportError:
-    from .config import TEAM_COLORS
+    from .config import TEAM_COLORS, VIZ_CONFIG
 
 
 def positions_by_lap(
@@ -115,7 +115,8 @@ def build_position_replay(
     steps = [
         dict(method='animate', label=str(int(lap)), args=[
             [str(int(lap))],
-            dict(mode='immediate', frame=dict(duration=250, redraw=True)),
+            dict(mode='immediate',
+                 frame=dict(duration=int(VIZ_CONFIG['replay_slider_ms']), redraw=True)),
         ])
         for lap in lap_list
     ]
@@ -124,10 +125,11 @@ def build_position_replay(
         pad=dict(t=10),
         steps=steps,
     )]
+    play_ms = int(VIZ_CONFIG['replay_play_ms'])
     play = dict(label='Play', method='animate', args=[None, dict(
-        frame=dict(duration=400, redraw=True), fromcurrent=True)])
+        frame=dict(duration=play_ms, redraw=True), fromcurrent=True)])
     pause = dict(label='Pause', method='animate', args=[[None], dict(
-        frame=dict(duration=400, redraw=True), mode='immediate')])
+        frame=dict(duration=play_ms, redraw=True), mode='immediate')])
 
     fig.update_layout(
         title=dict(text=title, x=0.02, font=dict(size=16, color='white')),

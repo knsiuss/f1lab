@@ -7,7 +7,7 @@ import pandas as pd
 from datetime import timedelta
 
 from shared import load_race_data, load_fastf1_session, show_plotly_chart, format_f1_time
-from config import FASTF1_CONFIG
+from config import FASTF1_CONFIG, SESSION_GUARD_HOURS
 from season_config import get_race_names, get_event_schedule_cached
 from replay import positions_by_lap, build_position_replay
 
@@ -25,9 +25,9 @@ def _event_state(year, race):
             return 'past', None
         date = ev.iloc[0]['EventDate']
         now = pd.Timestamp.now(tz='UTC')
-        if date > now + timedelta(days=2):
+        if date > now + timedelta(hours=SESSION_GUARD_HOURS):
             return 'future', date
-        if date >= now - timedelta(days=2):
+        if date >= now - timedelta(hours=SESSION_GUARD_HOURS):
             return 'live', date
         return 'past', date
     except Exception:

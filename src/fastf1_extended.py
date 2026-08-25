@@ -13,7 +13,7 @@ import numpy as np
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from config import FASTF1_CONFIG, MODEL_CONFIG
+from config import FASTF1_CONFIG, MODEL_CONFIG, PIT_STOP_CONFIG, WEATHER_THRESHOLDS
 
 logger = logging.getLogger(__name__)
 
@@ -209,11 +209,12 @@ def get_weather_summary(session: Any) -> Dict[str, Any]:
         }
         
         # Determine conditions
+        track_temp = summary['track_temp_avg']
         if summary['rainfall']:
             summary['conditions'] = 'Wet'
-        elif summary['track_temp_avg'] and summary['track_temp_avg'] > 45:
+        elif track_temp and track_temp > WEATHER_THRESHOLDS['hot_track_c']:
             summary['conditions'] = 'Hot'
-        elif summary['track_temp_avg'] and summary['track_temp_avg'] < 25:
+        elif track_temp and track_temp < WEATHER_THRESHOLDS['cool_track_c']:
             summary['conditions'] = 'Cool'
         else:
             summary['conditions'] = 'Dry'
@@ -417,7 +418,8 @@ def get_pit_stops(session: Any) -> pd.DataFrame:
                 pout_next = pout_s.iloc[i + 1] if i + 1 < len(dl) else None
                 if pout_next is not None and not pd.isna(pout_next):
                     cand = pout_next - pin
-                    if 2.0 <= cand <= 120.0:
+                    if (PIT_STOP_CONFIG['min_measured_sec'] <= cand
+                            <= PIT_STOP_CONFIG['max_measured_sec']):
                         pit_time, measured = cand, True
                 if pit_time is None:
                     pit_time = default_pit

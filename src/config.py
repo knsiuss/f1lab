@@ -524,6 +524,53 @@ MODEL_CONFIG: Dict[str, object] = {
     'fresh_tyre_advantage': -0.5,
 }
 
+# SETUP / AERO FINGERPRINT ANALYSIS (src/setupfingerprint.py)
+
+# Methodology knobs for deriving a setup proxy from public telemetry: corner
+# detection follows the smoothed-speed-minima approach; buckets split corners
+# into mechanical-grip vs aerodynamic regimes. Tunable in one place.
+AERO_CONFIG: Dict[str, object] = {
+    'smooth_window': 5,           # rolling-mean window over the speed trace (samples)
+    'min_speed_drop_kmh': 15.0,   # min braking into an apex to count as a corner
+    'slow_max_kmh': 120.0,        # apex <= this -> slow corner (mechanical grip)
+    'medium_max_kmh': 170.0,      # apex <= this -> medium corner
+    'top_trap_laps': 3,           # median of K best clean SpeedST laps = top-speed proxy
+    'min_corners_total': 4,       # fewer detected corners -> cornering block reported as None
+    'brake_window_samples': 12,   # samples before apex scanned for peak deceleration
+    'entry_scan_samples': 60,     # samples before apex scanned for the braking entry point
+}
+
+# PIT STOP MEASUREMENT SANITY
+
+# A measured PitIn->PitOut duration outside this window is not one continuous
+# stop (scramble across laps, missing data), so it falls back to the estimate.
+PIT_STOP_CONFIG: Dict[str, float] = {
+    'min_measured_sec': 2.0,
+    'max_measured_sec': 120.0,
+}
+
+# WEATHER CONDITION CLASSIFICATION
+
+WEATHER_THRESHOLDS: Dict[str, float] = {
+    'hot_track_c': 45.0,          # track temp above -> 'Hot'
+    'cool_track_c': 25.0,         # track temp below -> 'Cool'
+}
+
+# SESSION LIVE-WINDOW
+
+# Hours around a race weekend's EventDate treated as "live" for future-race
+# gating (shared by the Analysis Center and Live & Replay pages).
+SESSION_GUARD_HOURS: int = 48
+
+# VISUALISATION TIMING / GAUGE
+
+VIZ_CONFIG: Dict[str, float] = {
+    'replay_slider_ms': 250,      # per-frame duration when scrubbing the replay slider
+    'replay_play_ms': 400,        # per-frame duration during autoplay
+    'gauge_step_low': 0.6,        # gauge background band fractions of max value
+    'gauge_step_high': 0.85,
+}
+
 # DRIVER DATA MERGE
 
 # Merge detailed stats into main profiles

@@ -62,13 +62,17 @@ def fig_layout(height=400, **overrides):
     return base
 
 
-def time_axis_layout(label, total_range):
+# Fixed seconds between ticks on mm:ss formatted time axes.
+TIME_TICK_STEP_S = 5
+
+
+def time_axis_layout(label, total_range, step=TIME_TICK_STEP_S):
     """Return yaxis kwargs for a mm:ss formatted time axis.
 
     total_range: (min_seconds, max_seconds)
+    step: seconds between ticks
     """
     mn, mx = total_range
-    step = 5
     start = int(mn) // step * step
     stop = int(mx) // step * step + step + 1
     tickvals = list(range(start, stop, step))
