@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from shared import load_race_data, show_plotly_chart
-from config import DATA_DIR, TEAM_COLORS, FASTF1_CONFIG
+from config import DATA_DIR, TEAM_COLORS, FASTF1_CONFIG, STREAMLIT_CONFIG
 from loader import load_data as load_csv_data
 from season_config import get_race_names
 from styles import (
@@ -20,6 +20,23 @@ from prediction import (
     DEFAULT_BUDGET, DEFAULT_DRIVERS,
 )
 from backtest import walk_forward_backtest, METRICS as BACKTEST_METRICS
+
+
+@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl, show_spinner=False)
+def _cached_forecast(race_df, grid):
+    """Predictions rerun on every widget interaction otherwise."""
+    return predict_race(race_df, grid)
+
+
+@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl, show_spinner=False)
+def _cached_prices(race_df):
+    return compute_driver_prices(race_df)
+
+
+@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl, show_spinner=False)
+def _cached_backtest(race_df):
+    """Walk-forward backtest is the heaviest call on this page."""
+    return walk_forward_backtest(race_df)
 
 
 def _load_grid(year, race, race_df):
@@ -85,12 +102,12 @@ def page():
         st.info(f"No grid information found for {selected_race}.")
         return
 
-    predicted = add_predicted_points(predict_race(race_df, grid))
+    predicted = add_predicted_points(_cached_forecast(race_df, grid))
     if predicted.empty:
         st.info("Could not build a forecast for this race.")
         return
 
-    prices = compute_driver_prices(race_df)
+    prices = _cached_prices(race_df)
     predicted = add_price(predicted, prices)
 
     tabs = st.tabs(["Race Forecast", "Fantasy Team", "Forecast vs Actual",
@@ -212,7 +229,7 @@ def _tab_backtest(race_df):
         "estimated and cover only the races with enough history to score."
     )
 
-    per_race, summary = walk_forward_backtest(race_df)
+    per_race, summary = _cached_backtest(race_df)
     if summary['n_races'] == 0:
         st.info("Not enough completed races to backtest.")
         return
