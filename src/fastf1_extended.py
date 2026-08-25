@@ -11,18 +11,28 @@ import fastf1
 import pandas as pd
 import numpy as np
 import logging
-from typing import Dict, List, Optional, Any, Union
-from datetime import datetime, timedelta
-from pathlib import Path
-from config import FASTF1_CONFIG
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+from config import FASTF1_CONFIG, MODEL_CONFIG
 
 logger = logging.getLogger(__name__)
 
-# Cache setup
-CACHE_DIR = Path(__file__).parent.parent / 'cache'
-CACHE_DIR.mkdir(exist_ok=True)
-# Note: f1.py may override this with FASTF1_CONFIG.cache_dir if run via dashboard
-fastf1.Cache.enable_cache(str(CACHE_DIR))
+
+def _ensure_cache() -> None:
+    """Enable the FastF1 disk cache once, at the configured location.
+
+    Single source of truth is FASTF1_CONFIG.cache_dir (f1_cache/), matching
+    shared.setup_fastf1_cache -- importing this module no longer forks a second
+    cache under cache/.
+    """
+    try:
+        FASTF1_CONFIG.cache_dir.mkdir(exist_ok=True)
+        fastf1.Cache.enable_cache(str(FASTF1_CONFIG.cache_dir))
+    except Exception as e:  # cache is an optimisation; never block imports
+        logger.warning(f"Could not enable FastF1 cache: {e}")
+
+
+_ensure_cache()
 
 # SESSION INFORMATION
 
@@ -125,7 +135,6 @@ def get_session_schedule(session: Any) -> Dict[str, Any]:
         schedule = {}
         
         session_keys = ['Session1', 'Session2', 'Session3', 'Session4', 'Session5']
-        session_names = ['Session1', 'Session2', 'Session3', 'Session4', 'Session5']
         
         for key in session_keys:
             date_key = f'{key}Date'
@@ -338,84 +347,124 @@ def get_tyre_degradation(session: Any, driver: str) -> Dict[str, Any]:
 
 # PIT STOPS
 
+def _td_seconds(value: Any) -> Optional[float]:
+    """Coerce a Timedelta/timestamp/numeric to seconds, or None."""
+    try:
+        if value is None or pd.isna(value):
+            return None
+        if hasattr(value, 'total_seconds'):
+            return float(value.total_seconds())
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def get_pit_stops(session: Any) -> pd.DataFrame:
     """
     Get all pit stop data from the session.
-    
+
+    A stop is detected on the pit-entry lap (non-null ``PitInTime``). The
+    stop duration is measured across the pit-lane crossing boundary --
+    ``PitOutTime`` of the following lap minus ``PitInTime`` of the stop lap --
+    which is the only pairing that yields a positive, physical duration.
+    When that measurement is unavailable or implausible the configured model
+    default is used instead and ``Measured`` is False, so estimates are never
+    presented as telemetry.
+
     Args:
         session: FastF1 Session object
-        
+
     Returns:
-        DataFrame with pit stop information
+        DataFrame with Driver, Stop, Lap, PitTime (s), Compound (fitted on
+        the out lap when known) and Measured (bool).
     """
     if session is None:
         return pd.DataFrame()
-    
+
     try:
-        laps = session.laps.copy()
-        
-        # Find pit laps using PitInTime and PitOutTime
+        laps = session.laps
+        if laps is None or laps.empty:
+            return pd.DataFrame()
+        laps = laps.copy()
+        if not {'Driver', 'LapNumber'}.issubset(laps.columns):
+            return pd.DataFrame()
+
+        default_pit = float(MODEL_CONFIG['pit_loss_sec'])
+        has_pit_in = 'PitInTime' in laps.columns
+        if not has_pit_in:
+            # No telemetry pit markers at all -> fall back to stint changes.
+            return _pit_stops_from_stints(session, default_pit)
+
         pit_data = []
-        
-        for driver in laps['Driver'].unique():
-            driver_laps = laps[laps['Driver'] == driver].sort_values('LapNumber')
+        for driver, group in laps.groupby('Driver', dropna=False):
+            dl = group.sort_values('LapNumber').reset_index(drop=True)
+            pin_s = dl['PitInTime'].map(_td_seconds)
+            pout_s = (dl['PitOutTime'].map(_td_seconds)
+                      if 'PitOutTime' in dl.columns else pd.Series([None] * len(dl)))
+            compounds = (dl['Compound'].tolist()
+                         if 'Compound' in dl.columns else ['UNKNOWN'] * len(dl))
+
             stop_num = 0
-            
-            for idx, lap in driver_laps.iterrows():
-                pit_in = lap.get('PitInTime')
-                pit_out = lap.get('PitOutTime')
-                
-                # Check if this is a pit lap
-                if pd.notna(pit_out):
-                    stop_num += 1
-                    
-                    # Calculate pit time (stationary time in pits)
-                    pit_time = None
-                    if pd.notna(pit_in) and pd.notna(pit_out):
-                        if hasattr(pit_out, 'total_seconds') and hasattr(pit_in, 'total_seconds'):
-                            pit_time = pit_out.total_seconds() - pit_in.total_seconds()
-                        else:
-                            pit_time = float(pit_out) - float(pit_in)
-                        
-                        # Pit time should be positive and reasonable (2-60 seconds)
-                        if pit_time < 0 or pit_time > 120:
-                            pit_time = None
-                    
-                    # Get pit duration from lap time difference if needed
-                    if pit_time is None or pit_time < 2:
-                        # Use a reasonable default or estimate
-                        pit_duration = lap.get('PitOutTime')
-                        if pd.notna(pit_duration) and hasattr(pit_duration, 'total_seconds'):
-                            # Estimate based on position in pit lane
-                            pit_time = 22.0  # Average pit stop time
-                    
-                    pit_data.append({
-                        'Driver': driver,
-                        'Stop': stop_num,
-                        'Lap': int(lap['LapNumber']),
-                        'PitTime': round(pit_time, 1) if pit_time and pit_time > 0 else 22.0,
-                        'Compound': lap.get('Compound', 'UNKNOWN'),
-                    })
-        
-        if len(pit_data) == 0:
-            # Alternative: use stint changes to detect pit stops
-            stints = get_tyre_stints(session)
-            if not stints.empty:
-                for driver in stints['Driver'].unique():
-                    driver_stints = stints[stints['Driver'] == driver].sort_values('Stint')
-                    for i in range(1, len(driver_stints)):
-                        pit_data.append({
-                            'Driver': driver,
-                            'Stop': i,
-                            'Lap': int(driver_stints.iloc[i]['StartLap']),
-                            'PitTime': 22.0,  # Default estimate
-                            'Compound': driver_stints.iloc[i]['Compound'],
-                        })
-        
+            for i in range(len(dl)):
+                pin = pin_s.iloc[i]
+                # NOTE: Series.map turns returned None into NaN, so test with
+                # pd.isna rather than identity against None.
+                if pin is None or pd.isna(pin):
+                    continue  # not a pit-entry lap
+                stop_num += 1
+
+                pit_time, measured = None, False
+                pout_next = pout_s.iloc[i + 1] if i + 1 < len(dl) else None
+                if pout_next is not None and not pd.isna(pout_next):
+                    cand = pout_next - pin
+                    if 2.0 <= cand <= 120.0:
+                        pit_time, measured = cand, True
+                if pit_time is None:
+                    pit_time = default_pit
+
+                # Compound fitted for the next stint lives on the out lap.
+                compound = compounds[i + 1] if i + 1 < len(dl) else compounds[i]
+
+                pit_data.append({
+                    'Driver': driver,
+                    'Stop': stop_num,
+                    'Lap': int(dl['LapNumber'].iloc[i]),
+                    'PitTime': round(pit_time, 1),
+                    'Compound': compound if pd.notna(compound) else 'UNKNOWN',
+                    'Measured': measured,
+                })
+
+        if not pit_data:
+            return _pit_stops_from_stints(session, default_pit)
+
         return pd.DataFrame(pit_data)
-        
+
     except Exception as e:
         logger.error(f"Error getting pit stops: {e}")
+        return pd.DataFrame()
+
+
+def _pit_stops_from_stints(session: Any, default_pit: float) -> pd.DataFrame:
+    """Fallback: infer stops from tyre-stint changes; all times estimated."""
+    try:
+        stints = get_tyre_stints(session)
+        if stints.empty:
+            return pd.DataFrame()
+        pit_data = []
+        for driver in stints['Driver'].unique():
+            driver_stints = stints[stints['Driver'] == driver].sort_values('Stint')
+            for i in range(1, len(driver_stints)):
+                pit_data.append({
+                    'Driver': driver,
+                    'Stop': i,
+                    'Lap': int(driver_stints.iloc[i]['StartLap']),
+                    'PitTime': round(default_pit, 1),
+                    'Compound': driver_stints.iloc[i]['Compound'],
+                    'Measured': False,
+                })
+        return pd.DataFrame(pit_data)
+    except Exception as e:
+        logger.error(f"Error inferring pit stops from stints: {e}")
         return pd.DataFrame()
 
 # SECTOR TIMES

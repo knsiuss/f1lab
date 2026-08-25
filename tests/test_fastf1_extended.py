@@ -12,7 +12,6 @@ Uses mocking to avoid actual API calls during testing.
 
 import pytest
 import pandas as pd
-import numpy as np
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -30,6 +29,7 @@ from src.fastf1_extended import (
     get_race_control_messages,
     get_session_info,
     get_tyre_stints,
+    get_pit_stops,
     format_lap_time,
     format_f1_time,
     get_compound_color,
@@ -280,6 +280,57 @@ class TestGetDetailedPitAnalysis:
         result = get_detailed_pit_analysis(mock_session)
 
         assert isinstance(result, pd.DataFrame)
+
+
+class TestGetPitStops:
+    """Tests for get_pit_stops (cross-lap measurement + honest estimates)."""
+
+    @staticmethod
+    def _session(laps):
+        mock_session = MagicMock()
+        mock_session.laps = laps
+        return mock_session
+
+    def test_returns_empty_df_for_none(self):
+        result = get_pit_stops(None)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+
+    def test_measures_duration_across_lap_boundary(self):
+        """PitIn on lap N pairs with PitOut on lap N+1 -> positive duration."""
+        laps = pd.DataFrame({
+            'Driver': ['VER'] * 4,
+            'LapNumber': [10, 11, 12, 13],
+            'Compound': ['SOFT', 'SOFT', 'HARD', 'HARD'],
+            'PitInTime': [pd.NaT, pd.Timedelta(seconds=1000.0), pd.NaT, pd.NaT],
+            'PitOutTime': [pd.NaT, pd.NaT, pd.Timedelta(seconds=1022.5), pd.NaT],
+        })
+        result = get_pit_stops(self._session(laps))
+
+        assert len(result) == 1
+        row = result.iloc[0]
+        assert row['Lap'] == 11          # pit-entry lap
+        assert row['PitTime'] == 22.5    # measured across the boundary
+        assert bool(row['Measured']) is True
+        assert row['Compound'] == 'HARD'  # compound fitted for the next stint
+
+    def test_unmeasurable_stop_is_labelled_estimate(self):
+        """No following PitOutTime -> model default, flagged not measured."""
+        from src.config import MODEL_CONFIG
+
+        laps = pd.DataFrame({
+            'Driver': ['VER'] * 3,
+            'LapNumber': [1, 2, 3],
+            'Compound': ['SOFT', 'SOFT', 'SOFT'],
+            'PitInTime': [pd.NaT, pd.Timedelta(seconds=500.0), pd.NaT],
+            'PitOutTime': [pd.NaT, pd.NaT, pd.NaT],
+        })
+        result = get_pit_stops(self._session(laps))
+
+        assert len(result) == 1
+        row = result.iloc[0]
+        assert bool(row['Measured']) is False
+        assert row['PitTime'] == round(float(MODEL_CONFIG['pit_loss_sec']), 1)
 
 
 class TestGetRaceControlMessages:
