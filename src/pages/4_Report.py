@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import streamlit as st
 import plotly.graph_objects as go
 
-from shared import load_race_data, load_fastf1_session
+from shared import empty_state, load_race_data, load_fastf1_session
 from config import DATA_DIR, TEAM_COLORS, FASTF1_CONFIG
 from loader import load_race_grid
 from season_config import get_race_names
@@ -93,7 +93,7 @@ def page():
     year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
     df = load_race_data(year)
     if df is None or df.empty:
-        st.error("No data available")
+        empty_state(f"No {year} report yet", "Results appear here once races complete. For live session data, open Analysis Center.")
         return
 
     race_df = df[df['SessionType'] == 'Race'].copy() if 'SessionType' in df.columns else df.copy()

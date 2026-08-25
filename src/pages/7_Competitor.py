@@ -4,7 +4,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
 
-from shared import load_race_data
+from shared import empty_state, load_race_data
 from config import FASTF1_CONFIG
 from season_config import get_race_names
 from rival import (
@@ -19,7 +19,7 @@ def page():
     year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
     df = load_race_data(year)
     if df is None or df.empty:
-        st.error("No data available")
+        empty_state(f"No {year} results yet", "Results appear here once races complete. For live session data, open Analysis Center.")
         return
 
     race_df = df[df['SessionType'] == 'Race'].copy() if 'SessionType' in df.columns else df.copy()
@@ -66,7 +66,7 @@ def page():
             'Points': 'Points', 'GapToFocus': 'Gap to focus',
             'Level': 'Quality', 'Confidence': 'Confidence',
         })
-        st.dataframe(shown, use_container_width=True, hide_index=True)
+        st.dataframe(shown, width='stretch', hide_index=True)
         st.caption(
             f"Gap to focus is points ahead (+) or behind (-) of **{focus}**. "
             "Points are real results; rival status and confidence reflect the "

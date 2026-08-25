@@ -5,7 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from shared import load_race_data, show_plotly_chart
+from shared import empty_state, load_race_data, show_plotly_chart
 from config import TEAM_COLORS, FASTF1_CONFIG
 from season_config import get_completed_races, get_race_names
 from styles import (
@@ -31,7 +31,7 @@ def page():
     df = load_race_data(year)
 
     if df is None or df.empty:
-        st.error("No data available")
+        empty_state(f"No {year} results yet", "Results appear here once races complete. For live session data, open Analysis Center.")
         return
 
     # Get championship data

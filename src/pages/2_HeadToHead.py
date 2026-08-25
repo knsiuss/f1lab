@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from shared import load_race_data, show_plotly_chart
+from shared import empty_state, load_race_data, show_plotly_chart
 from config import TEAM_COLORS, FASTF1_CONFIG
 from styles import (
     GRID, LABEL_FONT, TEXT_PRIMARY, TEXT_SECONDARY, TITLE_FONT,
@@ -32,7 +32,7 @@ def page():
     df = load_race_data(year)
 
     if df is None or df.empty:
-        st.error("No data available")
+        empty_state(f"No {year} results yet", "Results appear here once races complete. For live session data, open Analysis Center.")
         return
 
     # Race sessions only (sprint double-counts tracks in season aggregates)
@@ -73,7 +73,7 @@ def _tab_teammates(race_df):
         ['Team', 'Driver 1', 'Driver 2', 'Races Together',
          'Race H2H', 'Quali H2H', 'Pts 1', 'Pts 2']
     ].copy()
-    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.dataframe(display, width='stretch', hide_index=True)
 
     st.markdown("##### Race Wins by Pairing")
     fig = go.Figure()
@@ -141,7 +141,7 @@ def _tab_matchup(race_df):
         st.metric("Points", f"{s['points']['driver1']} - {s['points']['driver2']}")
 
     st.markdown("##### Race-by-Race")
-    st.dataframe(result['details'], use_container_width=True, hide_index=True)
+    st.dataframe(result['details'], width='stretch', hide_index=True)
 
 
 def _tab_form(race_df):

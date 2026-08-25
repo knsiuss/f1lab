@@ -1,23 +1,14 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
 import fastf1
 import logging
-from pathlib import Path
 
 # Local imports
-from config import STREAMLIT_CONFIG, DATA_DIR, FASTF1_CONFIG, VIZ_CONFIG
-from loader import load_data as load_csv_data, clean_data, load_season_data
+from config import STREAMLIT_CONFIG, DATA_DIR, FASTF1_CONFIG
+from loader import load_data as load_csv_data, load_season_data
 
 logger = logging.getLogger(__name__)
 
-
-def render_header():
-    """Render dashboard header."""
-    year = st.session_state.get('selected_year', 2025)
-    st.markdown(f'<h1 class="main-header">F1 {year} Season Dashboard</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Analytics | Telemetry | Predictions</p>', unsafe_allow_html=True)
 
 
 @st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl)
@@ -29,18 +20,6 @@ def load_race_data(year):
         logger.error(f"Error loading season data for {year}: {e}")
         return None
 
-
-@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl)
-def load_sprint_data(year):
-    try:
-        data_dir = str(DATA_DIR)
-        sprint_file = str(Path(data_dir) / f'Formula1_{year}Season_SprintResults.csv')
-        df = load_csv_data(sprint_file)
-        if df is not None:
-            df = clean_data(df)
-        return df
-    except Exception:
-        return None
 
 
 @st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl)
@@ -91,79 +70,6 @@ def load_fastf1_session(year: int, race: str, session_type: str, load_telemetry:
         return None
 
 
-@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl)
-def get_real_grid_positions(year: int, race: str) -> dict:
-    """Fetch actual Qualifying grid positions from FastF1."""
-    try:
-        session = fastf1.get_session(year, race, 'Q')
-        session.load(telemetry=False, laps=False, weather=False)
-
-        if session.results is None or session.results.empty:
-            return {}
-
-        grid_map = {}
-        for drv in session.results['Abbreviation']:
-            res = session.results.loc[session.results['Abbreviation'] == drv].iloc[0]
-            grid = res['GridPosition']
-            if grid <= 0:
-                grid = res['Position']
-            grid_map[drv] = grid
-
-        return grid_map
-    except Exception as e:
-        logger.warning(f"Could not fetch real grid for {race}: {e}")
-        return {}
-
-
-def create_gauge(value, max_value, title, color="#E10600"):
-    """Create a gauge chart for telemetry display."""
-    try:
-        if value is None:
-            value = 0.0
-        elif isinstance(value, (bool, np.bool_)):
-            value = 100.0 if value else 0.0
-        elif hasattr(value, 'item'):
-            value = float(value.item())
-        elif isinstance(value, (np.integer, np.floating)):
-            value = float(value)
-        else:
-            value = float(value)
-    except (TypeError, ValueError):
-        value = 0.0
-
-    try:
-        max_value = float(max_value) if max_value and max_value > 0 else 100.0
-    except:
-        max_value = 100.0
-
-    value = max(0.0, min(float(value), float(max_value)))
-
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=value,
-        domain={'x': [0, 1], 'y': [0, 1]},
-        title={'text': title, 'font': {'size': 14, 'color': 'white'}},
-        gauge={
-            'axis': {'range': [0, max_value], 'tickcolor': "white"},
-            'bar': {'color': color},
-            'bgcolor': "gray",
-            'borderwidth': 2,
-            'bordercolor': "white",
-            'steps': [
-                {'range': [0, max_value * VIZ_CONFIG['gauge_step_low']], 'color': '#1a1a2e'},
-                {'range': [max_value * VIZ_CONFIG['gauge_step_low'], max_value * VIZ_CONFIG['gauge_step_high']], 'color': '#2a2a4e'},
-                {'range': [max_value * VIZ_CONFIG['gauge_step_high'], max_value], 'color': '#3a3a6e'}
-            ],
-        },
-        number={'font': {'color': 'white'}}
-    ))
-    fig.update_layout(
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='rgba(0,0,0,0)',
-        height=200,
-        margin=dict(l=20, r=20, t=40, b=20)
-    )
-    return fig
 
 
 def format_f1_time(td: pd.Timedelta) -> str:
@@ -189,7 +95,7 @@ def setup_fastf1_cache():
     return cache_dir
 
 
-def show_plotly_chart(fig, use_container_width=True, apply_theme=True, **kwargs):
+def show_plotly_chart(fig, width='stretch', apply_theme=True, **kwargs):
     """Display Plotly chart with custom theme and hidden toolbar."""
     if apply_theme:
         fig.update_layout(
@@ -234,4 +140,17 @@ def show_plotly_chart(fig, use_container_width=True, apply_theme=True, **kwargs)
                                    'autoScale2d', 'resetScale2d', 'toImage'],
         'staticPlot': False
     }
-    st.plotly_chart(fig, use_container_width=use_container_width, config=config, **kwargs)
+    st.plotly_chart(fig, width=width, config=config, **kwargs)
+
+
+def empty_state(title: str, hint: str = '') -> None:
+    """Consistent, calm empty state panel (season not started / no data yet)."""
+    hint_html = (f'<div style="color:#8a8a9a;font-size:.88rem;margin-top:.35rem;">{hint}</div>'
+                 if hint else '')
+    st.markdown(f"""
+    <div style="text-align:center;padding:2.2rem 1rem;border:1px dashed rgba(255,255,255,.14);
+                border-radius:14px;background:rgba(255,255,255,.02);margin:.4rem 0;">
+      <div style="font-weight:700;color:#e0e0e0;letter-spacing:.3px;">{title}</div>
+      {hint_html}
+    </div>""", unsafe_allow_html=True)
+

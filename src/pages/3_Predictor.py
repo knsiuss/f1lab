@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from shared import load_race_data, show_plotly_chart
+from shared import empty_state, load_race_data, show_plotly_chart
 from config import DATA_DIR, TEAM_COLORS, FASTF1_CONFIG, STREAMLIT_CONFIG
 from loader import load_race_grid
 from season_config import get_race_names
@@ -43,7 +43,7 @@ def page():
     year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
     df = load_race_data(year)
     if df is None or df.empty:
-        st.error("No data available")
+        empty_state(f"No {year} results yet", "Results appear here once races complete. For live session data, open Analysis Center.")
         return
 
     race_df = df[df['SessionType'] == 'Race'].copy() if 'SessionType' in df.columns else df.copy()
@@ -101,7 +101,7 @@ def _tab_forecast(predicted):
             'WinProb': 'Win %', 'PredictedPts': 'Pts'}
     shown = predicted[[c for c in cols if c in predicted.columns]].copy()
     shown = shown.rename(columns=cols)
-    st.dataframe(shown, use_container_width=True, hide_index=True)
+    st.dataframe(shown, width='stretch', hide_index=True)
 
     st.markdown("##### Win Probability by Driver")
     fig = go.Figure()
@@ -149,13 +149,13 @@ def _tab_fantasy(predicted):
     st.markdown("##### Recommended Lineup")
     disp = team[['Driver', 'Team', 'Grid', 'Predicted', 'PredictedPts', 'Price']].copy()
     disp.columns = ['Driver', 'Team', 'Grid', 'Pred', 'Pts', 'Price ($M)']
-    st.dataframe(disp.sort_values('Pred'), use_container_width=True, hide_index=True)
+    st.dataframe(disp.sort_values('Pred'), width='stretch', hide_index=True)
 
     st.markdown("##### Market Prices")
     price_df = predicted[['Driver', 'Team', 'Price', 'PredictedPts']].sort_values(
         'Price', ascending=False)
     price_df.columns = ['Driver', 'Team', 'Price ($M)', 'Predicted Pts']
-    st.dataframe(price_df, use_container_width=True, hide_index=True)
+    st.dataframe(price_df, width='stretch', hide_index=True)
 
 
 def _tab_actual(race_df, selected_race, predicted):
@@ -189,7 +189,7 @@ def _tab_actual(race_df, selected_race, predicted):
 
     disp = joined[['Predicted', 'Driver', 'Grid', 'Actual', 'PredictedPts', 'ActualPts']].copy()
     disp.columns = ['Pred', 'Driver', 'Grid', 'Actual', 'Pred Pts', 'Actual Pts']
-    st.dataframe(disp, use_container_width=True, hide_index=True)
+    st.dataframe(disp, width='stretch', hide_index=True)
 
 
 def _tab_backtest(race_df):
@@ -227,7 +227,7 @@ def _tab_backtest(race_df):
             'Baseline (grid)': summary.get(f'{metric}_baseline'),
             'Model better (races)': summary.get(f'{metric}_model_beats_baseline'),
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
     st.markdown("##### Per-race detail")
     detail_cols = [c for c in
@@ -237,7 +237,7 @@ def _tab_backtest(race_df):
     show = per_race[detail_cols].copy()
     show.columns = ['Race', 'Drivers', 'MAE (model)', 'MAE (grid)',
                     'Spearman (model)', 'Spearman (grid)', 'Estimated']
-    st.dataframe(show, use_container_width=True, hide_index=True)
+    st.dataframe(show, width='stretch', hide_index=True)
 
 
 page()
