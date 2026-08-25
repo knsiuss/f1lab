@@ -8,15 +8,14 @@ from datetime import timedelta
 
 from shared import load_race_data, load_fastf1_session, show_plotly_chart, format_f1_time
 from config import FASTF1_CONFIG
-from season_config import get_race_names
+from season_config import get_race_names, get_event_schedule_cached
 from replay import positions_by_lap, build_position_replay
 
 
 def _event_state(year, race):
     """Return ('future' | 'live' | 'past', EventDate or None) for a race weekend."""
     try:
-        from season_config import _get_schedule_cached
-        schedule = _get_schedule_cached(year)
+        schedule = get_event_schedule_cached(year)
         if schedule is None or schedule.empty:
             return 'past', None
         if schedule['EventDate'].dt.tz is None:

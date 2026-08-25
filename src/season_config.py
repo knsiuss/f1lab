@@ -53,8 +53,12 @@ FALLBACK_RACE_NAMES = {
 }
 
 
-def _get_schedule_cached(year):
-    """Get event schedule with in-memory cache to avoid repeated API calls."""
+def get_event_schedule_cached(year):
+    """Get the event schedule with in-memory cache to avoid repeated API calls.
+
+    Public accessor: pages use this (e.g. future-race gating) instead of
+    reaching into a module private.
+    """
     if year in _schedule_cache:
         return _schedule_cache[year]
     try:
@@ -70,7 +74,7 @@ def get_season_calendar(year):
 
     Falls back to the registered per-year fallback if the API is unavailable.
     """
-    schedule = _get_schedule_cached(year)
+    schedule = get_event_schedule_cached(year)
     if schedule is None or schedule.empty:
         return _fallback_calendar(year)
     calendar = []
@@ -92,7 +96,7 @@ def get_completed_races(year):
 
     Falls back to the registered per-year fallback if the API is unavailable.
     """
-    schedule = _get_schedule_cached(year)
+    schedule = get_event_schedule_cached(year)
     if schedule is None or schedule.empty:
         return _fallback_completed(year)
     try:

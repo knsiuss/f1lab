@@ -12,7 +12,7 @@ from shared import (
     show_plotly_chart, format_f1_time
 )
 from config import TEAM_COLORS, FASTF1_CONFIG, MODEL_CONFIG
-from season_config import get_race_names
+from season_config import get_race_names, get_event_schedule_cached
 from fastf1_extended import (
     get_tyre_stints, get_pit_stops, get_race_control_messages
 )
@@ -71,8 +71,7 @@ def page():
 
     # â”€â”€ Session guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
-        from season_config import _get_schedule_cached
-        schedule = _get_schedule_cached(year)
+        schedule = get_event_schedule_cached(year)
         if schedule is not None and not schedule.empty:
             if schedule['EventDate'].dt.tz is None:
                 schedule['EventDate'] = schedule['EventDate'].dt.tz_localize('UTC')
