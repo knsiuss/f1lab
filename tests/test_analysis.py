@@ -16,11 +16,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.analysis import (
-    calculate_driver_stats, calculate_team_stats,
-    calculate_combined_constructor_standings,
-    calculate_teammate_comparison
-)
+from src.analysis import calculate_driver_stats, calculate_teammate_comparison
 
 
 @pytest.fixture
@@ -67,60 +63,6 @@ class TestDriverStats:
         assert stats.loc['Driver B', 'Podium'] == 2
 
 
-class TestTeamStats:
-    """Tests for calculate_team_stats function."""
-    
-    def test_calculates_team_points(self, sample_race_data):
-        """Test team total points calculation."""
-        stats = calculate_team_stats(sample_race_data)
-        
-        assert 'Total_Points' in stats.columns
-        assert stats.loc['Team X', 'Total_Points'] == 43
-        assert stats.loc['Team Y', 'Total_Points'] == 43
-
-
-
-class TestCombinedConstructorStandings:
-    """Tests for calculate_combined_constructor_standings function."""
-
-    @pytest.fixture
-    def race_df(self):
-        return pd.DataFrame({
-            'Driver': ['NOR', 'VER', 'PIA', 'PER'],
-            'Team': ['McLaren', 'Red Bull', 'McLaren', 'Red Bull'],
-            'Track': ['Race 1', 'Race 1', 'Race 2', 'Race 2'],
-            'Position': [1, 2, 1, 2],
-            'Points': [25, 18, 25, 18],
-            'Finished': [True, True, True, True]
-        })
-
-    @pytest.fixture
-    def sprint_df(self):
-        return pd.DataFrame({
-            'Driver': ['NOR', 'VER'],
-            'Team': ['McLaren', 'Red Bull'],
-            'Track': ['Race 1', 'Race 1'],
-            'Position': [1, 2],
-            'Points': [8, 4],
-            'Finished': [True, True]
-        })
-
-    def test_combines_team_points(self, race_df, sprint_df):
-        """Test that constructor standings sum team points."""
-        standings = calculate_combined_constructor_standings(race_df, sprint_df)
-
-        assert 'Total_Points' in standings.columns
-        # McLaren: 25+25 race + 8 sprint = 58
-        # Red Bull: 18+18 race + 4 sprint = 40
-        assert standings.loc['McLaren', 'Total_Points'] == 58
-        assert standings.loc['Red Bull', 'Total_Points'] == 40
-
-    def test_includes_position_ranking(self, race_df, sprint_df):
-        """Test position ranking is assigned."""
-        standings = calculate_combined_constructor_standings(race_df, sprint_df)
-
-        assert standings.loc['McLaren', 'Position'] == 1
-        assert standings.loc['Red Bull', 'Position'] == 2
 
 
 class TestTeammateComparison:

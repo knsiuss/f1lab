@@ -13,8 +13,6 @@ from src.pace import (
     ESTIMATED,
     clean_laps_for_analysis,
     data_quality,
-    degradation_summary,
-    fit_degradation,
     long_run_quality,
     normalised_pace_by_stint,
 )
@@ -64,26 +62,6 @@ def test_data_quality_thresholds():
         assert data_quality(n)["estimated"] == ESTIMATED
 
 
-def test_fit_degradation_recovers_slope_and_intercept():
-    fit = fit_degradation(_laps(), driver="VER", compound="SOFT")
-    assert fit["level"] == "good"
-    assert fit["base_pace"] == pytest.approx(90.0, abs=0.01)
-    assert fit["deg_per_lap"] == pytest.approx(0.08, abs=0.001)
-    assert fit["n"] == 20
-
-
-def test_fit_degradation_insufficient_data():
-    fit = fit_degradation(_laps(n=1))
-    assert fit["level"] == "insufficient"
-    assert "base_pace" not in fit
-
-
-def test_fit_filters_by_driver():
-    df = pd.concat([_laps(driver="VER"), _laps(driver="LEC")])
-    fit = fit_degradation(df, driver="VER")
-    assert fit["n"] == 20
-
-
 def test_normalised_pace_by_stint_structure():
     out = normalised_pace_by_stint(_laps())
     assert len(out) == 1
@@ -101,13 +79,6 @@ def test_normalised_pace_two_stints():
     assert set(out["Stint"]) == {1, 2}
 
 
-def test_degradation_summary_per_compound():
-    df = pd.concat([_laps(compound="SOFT"), _laps(compound="MEDIUM")])
-    out = degradation_summary(df)
-    assert len(out) == 2
-    assert set(out["Compound"]) == {"SOFT", "MEDIUM"}
-
-
 def test_long_run_quality_respects_min_stint():
     df = pd.concat([_laps(n=20, stint=1), _laps(n=5, stint=2)])
     out = long_run_quality(df, min_stint=10)
@@ -117,5 +88,4 @@ def test_long_run_quality_respects_min_stint():
 
 def test_aggregations_empty_on_no_data():
     assert normalised_pace_by_stint(pd.DataFrame()).empty
-    assert degradation_summary(pd.DataFrame()).empty
     assert long_run_quality(pd.DataFrame()).empty

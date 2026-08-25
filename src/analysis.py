@@ -10,7 +10,6 @@ Championship standings and race statistics.
 import logging
 import pandas as pd
 import numpy as np
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -74,125 +73,7 @@ def calculate_driver_stats(df: pd.DataFrame) -> pd.DataFrame:
         logger.exception(f"Error calculating driver statistics: {e}")
         return pd.DataFrame()
 
-def calculate_team_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate constructor statistics from race results."""
-    logger.info("Calculating team statistics...")
 
-    try:
-        if df is None or df.empty:
-            logger.error("Cannot calculate team stats from empty DataFrame")
-            return pd.DataFrame()
-
-        required_cols = ['Team', 'Points', 'Driver', 'Finished']
-        missing = [col for col in required_cols if col not in df.columns]
-        if missing:
-            logger.error(f"Missing required columns: {missing}")
-            return pd.DataFrame()
-
-        team_agg = df.groupby('Team').agg({
-            'Points': ['sum', 'mean'],
-            'Driver': 'nunique',
-            'Position': 'mean',
-            'Finished': 'sum',
-            'Starting Grid': 'mean'
-        }).round(2)
-
-        team_agg.columns = ['_'.join(col).strip() for col in team_agg.columns.values]
-
-        team_analysis = team_agg.rename(columns={
-            'Points_sum': 'Total_Points',
-            'Points_mean': 'Avg_Points_Per_Entry',
-            'Driver_nunique': 'Drivers',
-            'Position_mean': 'Avg_Position',
-            'Finished_sum': 'Finishes',
-            'Starting Grid_mean': 'Avg_Grid'
-        })
-
-        # Optional column, aggregated separately (see calculate_driver_stats).
-        if 'Set Fastest Lap' in df.columns:
-            fl = df[df['Set Fastest Lap'].astype(str).str.lower() == 'yes'] \
-                .groupby('Team').size()
-            team_analysis['Fastest_Laps'] = fl
-        else:
-            team_analysis['Fastest_Laps'] = 0
-
-        team_analysis['Points_Per_Driver'] = (team_analysis['Total_Points'] / team_analysis['Drivers']).round(1)
-
-        races_count = df['Track'].nunique() if 'Track' in df.columns else 0
-        team_analysis['Total_Entries'] = team_analysis['Drivers'] * races_count
-        team_analysis['Finish_Rate'] = np.where(
-            team_analysis['Total_Entries'] > 0,
-            (team_analysis['Finishes'] / team_analysis['Total_Entries'] * 100).round(1),
-            0
-        )
-
-        # Stable output schema regardless of optional-column presence.
-        cols = ['Total_Points', 'Avg_Points_Per_Entry', 'Drivers', 'Avg_Position',
-                'Finishes', 'Fastest_Laps', 'Avg_Grid', 'Points_Per_Driver',
-                'Total_Entries', 'Finish_Rate']
-        team_analysis = team_analysis[cols]
-
-        logger.info(f"Calculated stats for {len(team_analysis)} teams")
-        return team_analysis
-
-    except Exception as e:
-        logger.exception(f"Error calculating team statistics: {e}")
-        return pd.DataFrame()
-
-def calculate_combined_constructor_standings(
-    df_race: pd.DataFrame, 
-    df_sprint: Optional[pd.DataFrame]
-) -> pd.DataFrame:
-    """
-    Calculate combined constructor standings with Race + Sprint points.
-    
-    Args:
-        df_race: Race results DataFrame.
-        df_sprint: Sprint results DataFrame (can be None).
-        
-    Returns:
-        pd.DataFrame: Constructor standings indexed by team name.
-    """
-    logger.info("Calculating combined constructor standings...")
-
-    # Race-only fallback if no sprint data
-    if df_sprint is None or df_sprint.empty:
-        race_points = df_race.groupby('Team')['Points'].sum().rename('Race_Points')
-        race_wins = df_race[df_race['Position'] == 1].groupby('Team').size().rename('Race_Wins')
-        standings = pd.DataFrame({'Race_Points': race_points}).fillna(0)
-        standings['Sprint_Points'] = 0
-        standings['Total_Points'] = standings['Race_Points']
-        standings = standings.join(race_wins, how='left').fillna(0)
-        standings['Sprint_Wins'] = 0
-        standings = standings.sort_values('Total_Points', ascending=False)
-        standings['Position'] = range(1, len(standings) + 1)
-        standings = standings[['Position', 'Race_Points', 'Sprint_Points', 'Total_Points', 'Race_Wins', 'Sprint_Wins']]
-        logger.info(f"Constructor standings calculated (race-only): {len(standings)} teams")
-        return standings
-
-    # Ensure Points column is numeric and fill NaN with 0
-    df_sprint = df_sprint.copy()
-    df_sprint['Points'] = pd.to_numeric(df_sprint['Points'], errors='coerce').fillna(0)
-    
-    race_points = df_race.groupby('Team')['Points'].sum().rename('Race_Points')
-    sprint_points = df_sprint.groupby('Team')['Points'].sum().rename('Sprint_Points')
-    
-    standings = pd.DataFrame({'Race_Points': race_points, 'Sprint_Points': sprint_points}).fillna(0)
-    standings['Total_Points'] = standings['Race_Points'] + standings['Sprint_Points']
-    
-    race_wins = df_race[df_race['Position'] == 1].groupby('Team').size().rename('Race_Wins')
-    sprint_wins = df_sprint[df_sprint['Position'] == 1].groupby('Team').size().rename('Sprint_Wins')
-    
-    standings = standings.join(race_wins, how='left').fillna(0)
-    standings = standings.join(sprint_wins, how='left').fillna(0)
-    
-    standings = standings.sort_values('Total_Points', ascending=False)
-    standings['Position'] = range(1, len(standings) + 1)
-    
-    standings = standings[['Position', 'Race_Points', 'Sprint_Points', 'Total_Points', 'Race_Wins', 'Sprint_Wins']]
-    
-    logger.info(f"Constructor standings calculated: {len(standings)} teams")
-    return standings
 
 def calculate_teammate_comparison(df: pd.DataFrame) -> pd.DataFrame:
     """

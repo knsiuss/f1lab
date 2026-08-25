@@ -162,38 +162,6 @@ def _fit_base_degradation(clean: pd.DataFrame) -> Optional[Dict[str, float]]:
     }
 
 
-def fit_degradation(
-    laps: pd.DataFrame,
-    driver: Optional[str] = None,
-    compound: Optional[str] = None,
-) -> Dict[str, object]:
-    """
-    Fit degradation and fresh-tyre base pace for one driver+compound.
-
-    ``base_pace`` is the projected fresh-tyre lap time (intercept), seconds per
-    lap; ``deg_per_lap`` is the degradation slope in seconds per lap of tyre
-    age. Both are estimates with a data-quality level.
-
-    Returns:
-        dict with ``base_pace``/``deg_per_lap``/``r2``/``n``/``quality``, or a
-        minimal ``level=insufficient`` dict when there are too few clean laps.
-    """
-    pool = laps
-    if driver is not None and "Driver" in pool.columns:
-        pool = pool[pool["Driver"] == driver]
-    if compound is not None and "Compound" in pool.columns:
-        pool = pool[pool["Compound"] == compound]
-
-    clean = _clean_pool(pool)
-    fit = _fit_base_degradation(clean)
-    if fit is None:
-        n = int(len(clean)) if not clean.empty else 0
-        return {"level": "insufficient", "n": n, "estimated": ESTIMATED}
-
-    fit["level"] = data_quality(fit["n"])["level"]
-    fit["quality"] = data_quality(fit["n"])
-    return fit
-
 
 def normalised_pace_by_stint(
     laps: pd.DataFrame, group_by_compound: bool = True
@@ -244,38 +212,6 @@ def normalised_pace_by_stint(
         })
     return pd.DataFrame(rows)
 
-
-def degradation_summary(laps: pd.DataFrame) -> pd.DataFrame:
-    """One degradation estimate row per driver+compound."""
-    clean = _clean_pool(laps)
-    if clean.empty or "Compound" not in clean.columns:
-        if clean.empty:
-            return pd.DataFrame()
-        grouped = clean.groupby("Driver")
-    else:
-        grouped = clean.groupby(["Driver", "Compound"])
-
-    rows = []
-    for (key, grp) in grouped:
-        if isinstance(key, tuple):
-            row = {"Driver": key[0], "Compound": key[1]}
-        else:
-            row = {"Driver": key}
-        fit = _fit_base_degradation(grp)
-        quality = data_quality(len(grp))
-        if fit is not None:
-            row.update({
-                "BasePace": round(fit["base_pace"], 3),
-                "DegPerLap": round(fit["deg_per_lap"], 4),
-                "R2": round(fit["r2"], 3),
-                "N": fit["n"],
-            })
-        else:
-            row.update({"BasePace": None, "DegPerLap": None, "R2": None, "N": len(grp)})
-        row.update({"Level": quality["level"], "Confidence": quality["confidence"],
-                    "Estimated": ESTIMATED})
-        rows.append(row)
-    return pd.DataFrame(rows)
 
 
 def long_run_quality(laps: pd.DataFrame, min_stint: int = 10) -> pd.DataFrame:

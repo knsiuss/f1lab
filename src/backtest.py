@@ -291,26 +291,3 @@ def _win_count(model_col: pd.Series, base_col: pd.Series,
 # Explainability
 # ---------------------------------------------------------------------------
 
-def explain_prediction(row: pd.Series, field: int) -> List[str]:
-    """
-    Human-readable breakdown of why the model placed one driver where it did.
-
-    The three weighted components (grid advantage, team pace, driver form) are
-    shown with their contribution, so a prediction is auditable rather than a
-    black-box number. ``field`` is the grid size used to normalise the grid
-    advantage (the same value ``predict_race`` used).
-
-    Returns:
-        List of lines, e.g. ``["VER: predicted P1 (Score 0.880)", ...]``.
-    """
-    grid_pos = row['Grid']
-    field = max(1, int(field))
-    grid_adv = max(0.0, 1.0 - (grid_pos - 1) / field)
-    from prediction import W_FORM, W_GRID, W_TEAM
-    return [
-        f"{row['Driver']}: predicted P{int(row['Predicted'])} "
-        f"(Score {float(row['Score']):.3f})",
-        f"  grid P{grid_pos}: {grid_adv:.3f} x {W_GRID:.0%}",
-        f"  team pace: {float(row['TeamPace']):.3f} x {W_TEAM:.0%}",
-        f"  driver form: {float(row['Form']):.3f} x {W_FORM:.0%}",
-    ]

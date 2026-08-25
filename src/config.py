@@ -549,26 +549,17 @@ PIT_STOP_CONFIG: Dict[str, float] = {
     'max_measured_sec': 120.0,
 }
 
-# WEATHER CONDITION CLASSIFICATION
-
-WEATHER_THRESHOLDS: Dict[str, float] = {
-    'hot_track_c': 45.0,          # track temp above -> 'Hot'
-    'cool_track_c': 25.0,         # track temp below -> 'Cool'
-}
-
 # SESSION LIVE-WINDOW
 
 # Hours around a race weekend's EventDate treated as "live" for future-race
 # gating (shared by the Analysis Center and Live & Replay pages).
 SESSION_GUARD_HOURS: int = 48
 
-# VISUALISATION TIMING / GAUGE
+# VISUALISATION TIMING
 
 VIZ_CONFIG: Dict[str, float] = {
     'replay_slider_ms': 250,      # per-frame duration when scrubbing the replay slider
     'replay_play_ms': 400,        # per-frame duration during autoplay
-    'gauge_step_low': 0.6,        # gauge background band fractions of max value
-    'gauge_step_high': 0.85,
 }
 
 # DRIVER DATA MERGE

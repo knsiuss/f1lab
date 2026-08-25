@@ -14,7 +14,6 @@ from src.backtest import (
     METRICS,
     evaluate_race,
     exact_match_rate,
-    explain_prediction,
     grid_baseline,
     mean_abs_error,
     podium_overlap,
@@ -190,19 +189,3 @@ def test_walk_forward_empty_inputs():
     per_race, summary = walk_forward_backtest(pd.DataFrame())
     assert per_race.empty
     assert summary['n_races'] == 0
-
-
-# ---------------------------------------------------------------------------
-# Explainability
-# ---------------------------------------------------------------------------
-
-def test_explain_prediction_breaks_down_score():
-    grid = {'A1': 1, 'B1': 2, 'A2': 3, 'C1': 4, 'B2': 5}
-    pred = predict_race(None, grid)
-    lines = explain_prediction(pred.iloc[0], field=len(grid))
-    joined = '\n'.join(lines)
-    assert 'predicted P1' in joined
-    assert 'x 40%' in joined  # grid weight
-    assert 'x 35%' in joined  # team weight
-    assert 'x 25%' in joined  # form weight
-    assert 'Score' in joined
