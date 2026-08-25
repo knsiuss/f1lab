@@ -29,8 +29,11 @@ src/
   rival.py                  # Head-to-head, watchlist, circuit insights (R1)
   sector.py                 # Sector/corner insights from lap sector times (R3)
   compare.py                # Session-to-session pace comparison (R3)
+  pitwindow.py              # Pit-window radar (grid-search on whatif engine)
+  report.py                 # Dependency-free markdown weekend report
+  replay.py                 # Animated position replay figure
+  styles.py                 # Plotly design tokens + shared layout helpers
   fastf1_extended.py        # FastF1 data extraction (weather, pits, sectors, etc.)
-  advanced_viz.py           # Plotly telemetry comparison
   assets/
     style.css               # Global CSS (glassmorphism dark theme)
   pages/

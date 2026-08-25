@@ -79,30 +79,28 @@ Open **http://localhost:8501** in your browser.
 ```
 f1lab/
 ├── src/                    # Source code
-│   ├── f1.py               # Main Streamlit application
-│   ├── config.py           # Configuration and constants
+│   ├── f1.py               # Main Streamlit application (entry point)
+│   ├── shared.py           # Shared utilities (data loading, cache, chart theme)
+│   ├── config.py           # Configuration and constants (MODEL_CONFIG, teams, drivers)
+│   ├── loader.py           # CSV loading + cleaning
 │   ├── analysis.py         # Statistical calculations
-│   ├── model.py            # ML prediction model
-│   ├── loader.py           # Data loading utilities
-│   ├── features.py         # Feature engineering
-│   ├── fastf1_extended.py  # Telemetry data processing
-│   ├── fastf1_loader.py    # FastF1 session loading
-│   ├── fastf1_plotting.py  # FastF1 visualizations
-│   ├── fastf1_animations.py # Animated charts
-│   ├── advanced_viz.py     # Advanced visualizations
-│   ├── qualifying_viz.py   # Qualifying charts
-│   ├── race_replay_data.py # Replay data processing
-│   ├── race_replay_viz.py  # Replay visualizations
+│   ├── model.py            # Race strategy simulator
+│   ├── prediction.py       # Race predictor + fantasy points
+│   ├── backtest.py         # Walk-forward backtest vs grid baseline
+│   ├── whatif.py           # Strategy what-if scenarios + undercut
+│   ├── pace.py             # Normalised pace, degradation, data-quality gates
+│   ├── pitwindow.py        # Pit-window radar per driver
+│   ├── briefing.py         # Pre-race briefing / post-race debrief
+│   ├── rival.py            # Rival watchlist, head-to-head, circuit insights
+│   ├── sector.py           # Sector insights from lap sector times
+│   ├── compare.py          # Session-to-session pace comparison
+│   ├── fastf1_extended.py  # FastF1 extraction (weather, pits, sectors, telemetry)
 │   ├── replay.py           # Animated position replay
-│   ├── home.py             # Homepage component
-│   └── evaluate.py         # Model evaluation
-├── data/                   # Season datasets
-│   ├── Formula1_2025Season_RaceResults.csv
-│   ├── Formula1_2025Season_QualifyingResults.csv
-│   ├── Formula1_2025Season_SprintResults.csv
-│   └── Formula1_2025Season_SprintQualifyingResults.csv
+│   ├── report.py           # Markdown weekend report
+│   ├── styles.py           # Plotly design tokens
+│   └── pages/              # Streamlit pages (Dashboard ... Competitor Analysis)
+├── data/                   # Season datasets (Formula1_{year}Season_*.csv)
 ├── notebooks/              # Jupyter analysis notebooks
-├── models/                 # Trained ML models
 ├── tests/                  # Unit tests
 ├── .streamlit/             # Streamlit configuration
 ├── requirements.txt        # Python dependencies
