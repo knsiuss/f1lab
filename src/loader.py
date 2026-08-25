@@ -9,7 +9,7 @@ CSV data loading and preprocessing.
 
 import logging
 import pandas as pd
-from typing import Optional
+from typing import Dict, Optional
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -132,3 +132,46 @@ def load_season_data(data_dir: str, year: int) -> Optional[pd.DataFrame]:
             frames.append(df_sprint)
 
     return clean_data(pd.concat(frames, ignore_index=True))
+
+
+def load_race_grid(data_dir: str, year: int, race: str,
+                   race_df: Optional[pd.DataFrame] = None) -> Dict[str, int]:
+    """Qualifying grid for one race, falling back to the race's Starting Grid.
+
+    Canonical implementation shared by the Predictor and Report pages (they
+    previously carried near-identical copies). In the fallback, grid entries
+    <= 0 mean unknown and are skipped.
+
+    Args:
+        data_dir: Directory containing the CSV files.
+        year: Season year used in the CSV filenames.
+        race: Track name to look up.
+        race_df: Cleaned season frame for the Starting-Grid fallback.
+
+    Returns:
+        dict mapping driver name to grid position (possibly empty).
+    """
+    try:
+        qpath = Path(data_dir) / f'Formula1_{year}Season_QualifyingResults.csv'
+        qdf = load_data(str(qpath))
+        if (qdf is not None and not qdf.empty and 'Track' in qdf.columns
+                and 'Driver' in qdf.columns):
+            grid: Dict[str, int] = {}
+            for _, r in qdf[qdf['Track'] == race].iterrows():
+                pos = pd.to_numeric(r.get('Position'), errors='coerce')
+                if pd.notna(pos):
+                    grid[r['Driver']] = int(pos)
+            if grid:
+                return grid
+    except Exception as e:
+        logger.warning(f"Qualifying grid unavailable for {year} {race}: {e}")
+
+    grid = {}
+    if (race_df is not None and not race_df.empty
+            and {'Track', 'Driver'}.issubset(race_df.columns)):
+        sub = race_df[race_df['Track'] == race]
+        for _, r in sub.iterrows():
+            g = pd.to_numeric(r.get('Starting Grid'), errors='coerce')
+            if pd.notna(g) and g > 0:
+                grid[r['Driver']] = int(g)
+    return grid

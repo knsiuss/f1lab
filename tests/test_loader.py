@@ -16,7 +16,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.loader import load_data, clean_data, load_season_data
+from src.loader import load_data, clean_data, load_season_data, load_race_grid
 
 
 class TestLoadData:
@@ -60,6 +60,35 @@ class TestLoadSeasonData:
     def test_load_season_data_missing_year_returns_none(self, tmp_path):
         """A season with no files returns None rather than falling back to 2025."""
         assert load_season_data(str(tmp_path), 2024) is None
+
+
+class TestLoadRaceGrid:
+    """Tests for load_race_grid (quali first, Starting-Grid fallback)."""
+
+    def _write_quali(self, tmp_path, year):
+        csv = ("Driver,Position,Track\n"
+               "VER,1,Race 1\n"
+               "NOR,2,Race 1\n")
+        path = tmp_path / f'Formula1_{year}Season_QualifyingResults.csv'
+        path.write_text(csv, encoding='utf-8')
+
+    def test_prefers_qualifying_csv(self, tmp_path):
+        self._write_quali(tmp_path, 2024)
+        grid = load_race_grid(str(tmp_path), 2024, 'Race 1')
+        assert grid == {'VER': 1, 'NOR': 2}
+
+    def test_falls_back_to_starting_grid_and_skips_unknown(self, tmp_path):
+        """Missing quali file -> race CSV; grid <= 0 means unknown."""
+        race_df = pd.DataFrame({
+            'Track': ['Race 1', 'Race 1', 'Race 1'],
+            'Driver': ['A', 'B', 'C'],
+            'Starting Grid': [3, 0, 1],
+        })
+        grid = load_race_grid(str(tmp_path), 2024, 'Race 1', race_df=race_df)
+        assert grid == {'A': 3, 'C': 1}
+
+    def test_no_data_returns_empty(self, tmp_path):
+        assert load_race_grid(str(tmp_path), 2024, 'Race 1') == {}
 
 
 class TestCleanData:

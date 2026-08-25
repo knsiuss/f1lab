@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 
 from shared import load_race_data, show_plotly_chart
 from config import DATA_DIR, TEAM_COLORS, FASTF1_CONFIG, STREAMLIT_CONFIG
-from loader import load_data as load_csv_data
+from loader import load_race_grid
 from season_config import get_race_names
 from styles import (
     GRID, LABEL_FONT, TEXT_PRIMARY, TEXT_SECONDARY, TITLE_FONT,
@@ -37,34 +37,6 @@ def _cached_prices(race_df):
 def _cached_backtest(race_df):
     """Walk-forward backtest is the heaviest call on this page."""
     return walk_forward_backtest(race_df)
-
-
-def _load_grid(year, race, race_df):
-    """Qualifying grid for a race, falling back to the race's Starting Grid."""
-    try:
-        qpath = DATA_DIR / f'Formula1_{year}Season_QualifyingResults.csv'
-        qdf = load_csv_data(str(qpath))
-        if qdf is not None and not qdf.empty and 'Track' in qdf.columns:
-            sub = qdf[qdf['Track'] == race]
-            grid = {}
-            for _, r in sub.iterrows():
-                pos = pd.to_numeric(r.get('Position'), errors='coerce')
-                if pd.notna(pos):
-                    grid[r['Driver']] = int(pos)
-            if grid:
-                return grid
-    except Exception:
-        pass
-
-    # Fallback: starting grid recorded in the race results
-    grid = {}
-    if race_df is not None and 'Track' in race_df.columns:
-        sub = race_df[race_df['Track'] == race]
-        for _, r in sub.iterrows():
-            g = pd.to_numeric(r.get('Starting Grid'), errors='coerce')
-            if pd.notna(g) and g > 0:
-                grid[r['Driver']] = int(g)
-    return grid
 
 
 def page():
@@ -97,7 +69,7 @@ def page():
     selected_race = st.selectbox("Grand Prix", all_races, key="pred_race",
                                  label_visibility="collapsed")
 
-    grid = _load_grid(year, selected_race, race_df)
+    grid = load_race_grid(str(DATA_DIR), year, selected_race, race_df)
     if not grid:
         st.info(f"No grid information found for {selected_race}.")
         return
