@@ -1,4 +1,5 @@
-﻿import sys
+# -*- coding: utf-8 -*-
+import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -11,8 +12,8 @@ from shared import (
     load_race_data, load_fastf1_session, setup_fastf1_cache,
     show_plotly_chart, format_f1_time
 )
-from config import TEAM_COLORS, FASTF1_CONFIG, MODEL_CONFIG
-from season_config import get_race_names, get_event_schedule_cached
+from config import TEAM_COLORS, FASTF1_CONFIG, MODEL_CONFIG, SESSION_GUARD_HOURS, STREAMLIT_CONFIG
+from season_config import get_race_names, get_event_schedule_cached, get_completed_races
 from fastf1_extended import (
     get_tyre_stints, get_pit_stops, get_race_control_messages
 )
@@ -21,17 +22,150 @@ from pace import normalised_pace_by_stint, long_run_quality
 from whatif import Scenario, compare_scenarios, undercut_delta
 from sector import sector_summary, sector_deficits
 from compare import compare_sessions
+from setupfingerprint import fingerprint, normalise_fingerprint, fingerprint_shift
 from pitwindow import pit_window
 from datetime import timedelta
 
 
 from styles import (
-    COMPOUND_COLORS, FONT, GRID, LABEL_FONT, TEXT_PRIMARY, TEXT_SECONDARY,
-    TITLE_FONT, ZERO_LINE, fig_layout as _fig_layout,
+    COMPOUND_COLORS, FONT, GRID, GRID_EMPH, LABEL_FONT, TEXT_PRIMARY,
+    TEXT_SECONDARY, TITLE_FONT, ZERO_LINE, fig_layout as _fig_layout,
     time_axis_layout as _time_axis_layout,
 )
 
 DEFAULT_DRIVERS = 3  # Show fewer drivers by default for clarity
+
+@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl, show_spinner=False)
+def _cached_fingerprint(year, race):
+    """Session fingerprint, cached: telemetry extraction is too heavy per rerun."""
+    setup_fastf1_cache()
+    s = load_fastf1_session(year, race, 'Race')
+    if s is None or s.laps is None or s.laps.empty:
+        return pd.DataFrame()
+    return fingerprint(s.laps, s)
+
+
+def _tab_setup_aero(year, selected_race):
+    st.subheader("Setup Fingerprint (estimated)")
+    st.caption(
+        "First-principles setup proxy from public telemetry only. Top speed "
+        "is the median of the best clean-lap trap readings; cornering metrics "
+        "are mean apex speeds in slow/medium/fast buckets detected on each "
+        "driver's fastest clean lap, plus mean peak braking g. Everything is "
+        "estimated; confidence follows the clean-lap sample. Trap speeds "
+        "include slipstream and DRS effects that cannot be fully removed "
+        "from public data."
+    )
+
+    fp = _cached_fingerprint(year, selected_race)
+    if fp.empty:
+        st.info("Not enough clean-lap data to build a fingerprint for this session.")
+        return
+
+    norm = normalise_fingerprint(fp)
+
+    shown = fp[['Driver', 'Team', 'TopSpeed', 'SlowApex', 'MediumApex',
+                'FastApex', 'BrakeDecelG', 'CornersDetected', 'Confidence']].copy()
+    shown.columns = ['Driver', 'Team', 'Top speed (km/h)', 'Slow apex (km/h)',
+                     'Medium apex (km/h)', 'Fast apex (km/h)', 'Braking (g)',
+                     'Corners', 'Confidence']
+    st.dataframe(shown, use_container_width=True, hide_index=True)
+
+    # Setup trade-off map: straight-line index vs cornering index.
+    idx_cols = ['TopSpeedIdx', 'SlowApexIdx', 'MediumApexIdx', 'FastApexIdx']
+    if all(c in norm.columns for c in idx_cols):
+        plot_df = norm.copy()
+        corner_idx = plot_df[idx_cols[1:]].mean(axis=1, skipna=True)
+        plot_df['CorneringIdx'] = corner_idx.round(3)
+        plot_df = plot_df.dropna(subset=['TopSpeedIdx', 'CorneringIdx'])
+        if not plot_df.empty:
+            fig = go.Figure()
+            for _, r in plot_df.iterrows():
+                fig.add_trace(go.Scatter(
+                    x=[r['TopSpeedIdx']], y=[r['CorneringIdx']], mode='markers+text',
+                    text=[r['Driver']], textposition='top center',
+                    textfont=dict(size=9, color=TEXT_SECONDARY),
+                    marker=dict(size=11,
+                                color=TEAM_COLORS.get(r.get('Team'), '#888'),
+                                line=dict(width=1, color='rgba(255,255,255,0.4)')),
+                    name=r['Driver'],
+                    hovertemplate=(
+                        f"<b>{r['Driver']}</b><br>Top speed idx: %{{x:.3f}}"
+                        f"<br>Cornering idx: %{{y:.3f}}<extra></extra>"
+                    ),
+                ))
+            fig.add_hline(y=1.0, line=dict(color=GRID_EMPH, dash='dash'))
+            fig.add_vline(x=1.0, line=dict(color=GRID_EMPH, dash='dash'))
+            fig.update_layout(**_fig_layout(height=460,
+                title=dict(text="Setup trade-off map (session best = 1.000)",
+                           font=TITLE_FONT, x=0.01),
+                xaxis=dict(title=dict(text="Straight-line index", font=LABEL_FONT),
+                           gridcolor=GRID),
+                yaxis=dict(title=dict(text="Cornering index", font=LABEL_FONT),
+                           gridcolor=GRID),
+                showlegend=False,
+            ))
+            show_plotly_chart(fig)
+            st.caption(
+                "Bottom-right leans low-drag / top-speed; top-left leans "
+                "high-downforce / cornering. Indices are relative to this "
+                "session's best (estimated)."
+            )
+
+    # Upgrade detector: diff against another race.
+    st.markdown("---")
+    st.subheader("Shift vs Another Race")
+    st.caption(
+        "Per-driver metric difference between two races (positive = higher "
+        "in the selected race). A consistent shift across drivers of one team "
+        "can indicate a setup change or upgrade; small shifts are noise, and "
+        "track character moves every team together."
+    )
+
+    race_names = get_race_names(year)
+    all_races = list(race_names.keys()) if race_names else []
+    if len(all_races) < 2:
+        st.info("Need at least two races to compute a shift.")
+        return
+
+    try:
+        completed = get_completed_races(year)
+        prior = [r for r in all_races if r in completed and r != selected_race]
+        default_race = prior[-1] if prior else all_races[0]
+    except Exception:
+        default_race = all_races[0]
+
+    compare_race = st.selectbox("Compare against", [r for r in all_races if r != selected_race],
+                                index=max(0, all_races.index(default_race) - 1
+                                          if default_race in all_races else 0),
+                                key="aero_shift_race")
+
+    shift = _cached_shift(year, compare_race, selected_race)
+    if shift.empty:
+        st.info("No comparable drivers between the two sessions.")
+        return
+
+    disp = shift.rename(columns={
+        'TopSpeed_delta': 'Top speed delta',
+        'SlowApex_delta': 'Slow apex delta',
+        'MediumApex_delta': 'Medium apex delta',
+        'FastApex_delta': 'Fast apex delta',
+        'BrakeDecelG_delta': 'Braking delta (g)',
+        'AbsShift': 'Total |shift|',
+    })
+    keep = [c for c in ['Driver', 'Top speed delta', 'Slow apex delta',
+                        'Medium apex delta', 'Fast apex delta',
+                        'Braking delta (g)', 'Total |shift|'] if c in disp.columns]
+    st.dataframe(disp[keep], use_container_width=True, hide_index=True)
+
+
+@st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl, show_spinner=False)
+def _cached_shift(year, race_a, race_b):
+    """Fingerprint diff between two cached session fingerprints."""
+    fa = _cached_fingerprint(year, race_a)
+    fb = _cached_fingerprint(year, race_b)
+    return fingerprint_shift(fa, fb)
+
 
 def page():
     year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
@@ -41,7 +175,7 @@ def page():
         st.error("No data available")
         return
 
-    # â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Header --
     st.markdown(f"""
     <div style="text-align:center;padding:1.2rem 0 0.8rem 0;">
         <h1 style="font-size:2.2rem;font-weight:800;color:#E10600;margin:0;
@@ -54,7 +188,7 @@ def page():
     </div>
     """, unsafe_allow_html=True)
 
-    # â”€â”€ Race selector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Race selector --
     race_names = get_race_names(year)
     all_races = list(race_names.keys()) if race_names else []
     if not all_races:
@@ -69,7 +203,7 @@ def page():
         session_type = st.selectbox("Session", ["Race", "Qualifying", "Sprint"],
                                     key="analysis_session")
 
-    # â”€â”€ Session guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- Session guard --
     try:
         schedule = get_event_schedule_cached(year)
         if schedule is not None and not schedule.empty:
@@ -79,7 +213,7 @@ def page():
             if not race_event.empty:
                 event = race_event.iloc[0]
                 now = pd.Timestamp.now(tz='UTC')
-                if event['EventDate'] > (now + timedelta(hours=48)):
+                if event['EventDate'] > (now + timedelta(hours=SESSION_GUARD_HOURS)):
                     st.info(f"{selected_race} has not started yet.")
                     return
     except Exception:
@@ -98,11 +232,12 @@ def page():
         st.warning("No lap data for this session.")
         return
 
-    # â”€â”€ KPI row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # -- KPI row --
     _render_kpi_row(laps, session)
 
-    # â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    tabs = st.tabs(["Pace & Laps", "Strategy & Stints", "Race Battles", "Performance Insights", "Sector & Sessions"])
+    # -- Tabs --
+    tabs = st.tabs(["Pace & Laps", "Strategy & Stints", "Race Battles",
+                    "Performance Insights", "Sector & Sessions", "Setup & Aero"])
 
     with tabs[0]:
         _tab_pace(laps, session, selected_race)
@@ -119,10 +254,11 @@ def page():
     with tabs[4]:
         _tab_sector_compare(laps, selected_race, year, session_type)
 
+    with tabs[5]:
+        _tab_setup_aero(year, selected_race)
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
 # KPI ROW
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 def _render_kpi_row(laps, session):
     col_a, col_b, col_c, col_d, col_e = st.columns(5)
 
@@ -172,9 +308,7 @@ def _render_kpi_row(laps, session):
             """, unsafe_allow_html=True)
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # TAB 1: PACE & LAPS
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 def _tab_pace(laps, session, race_name):
     st.subheader("Lap Time Evolution")
 
@@ -285,7 +419,7 @@ def _tab_pace(laps, session, race_name):
     show_plotly_chart(fig)
 
 
-    # â”€â”€ Fastest laps table â”€â”€
+    # -- Fastest laps table --
     st.markdown("#### Fastest Laps")
     fastest = laps.groupby('Driver').apply(
         lambda g: g.nsmallest(1, 'LapTime')).reset_index(drop=True)
@@ -297,7 +431,7 @@ def _tab_pace(laps, session, race_name):
         table = table.rename(columns={'LapNumber': 'Lap', 'Compound': 'Tyre'})
         st.dataframe(table, use_container_width=True, hide_index=True)
 
-    # â”€â”€ Head-to-head pace â”€â”€
+    # -- Head-to-head pace --
     st.markdown("---")
     st.subheader("Head-to-Head Pace")
 
@@ -427,7 +561,6 @@ def _tab_pace(laps, session, race_name):
 
 
 # TAB 2: STRATEGY & STINTS
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 def _tab_strategy(laps, session, race_name):
     st.subheader("Tyre Strategy Map")
 
@@ -463,7 +596,7 @@ def _tab_strategy(laps, session, race_name):
                     hovertemplate=(
                         f"<b>{driver}</b><br>"
                         f"Compound: {compound}<br>"
-                        f"Lap {start}â€“{end}<br>"
+                        f"Lap {start}-{end}<br>"
                         f"Stint: {width} laps"
                         "<extra></extra>"
                     ),
@@ -471,7 +604,7 @@ def _tab_strategy(laps, session, race_name):
 
         total_laps = int(tyre_data['EndLap'].max()) if 'EndLap' in tyre_data.columns else 50
         fig.update_layout(**_fig_layout(height=max(480, len(drivers) * 28),
-            title=dict(text=f"Tyre Strategy â€” {race_name}", font=TITLE_FONT, x=0.01),
+            title=dict(text=f"Tyre Strategy - {race_name}", font=TITLE_FONT, x=0.01),
             xaxis=dict(title=dict(text="Lap", font=LABEL_FONT), range=[0, total_laps + 2],
                        showgrid=False, tickfont=dict(size=11, color=TEXT_SECONDARY)),
             yaxis=dict(categoryorder='array', categoryarray=drivers[::-1], showgrid=True,
@@ -493,7 +626,7 @@ def _tab_strategy(laps, session, race_name):
     else:
         st.info("Tyre strategy data not available")
 
-    # â”€â”€ Pit stops â”€â”€
+    # -- Pit stops --
     st.markdown("---")
     st.subheader("Pit Stop Analysis")
 
@@ -550,7 +683,7 @@ def _tab_strategy(laps, session, race_name):
     else:
         st.info("No pit stop data available")
 
-    # â”€â”€ Strategy simulator â”€â”€
+    # -- Strategy simulator --
     st.markdown("---")
     st.subheader("Strategy Simulator")
 
@@ -673,9 +806,7 @@ def _tab_strategy(laps, session, race_name):
         )
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # TAB 3: RACE BATTLES
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 def _tab_battles(laps, session):
     st.subheader("Position Evolution")
 
@@ -884,7 +1015,7 @@ def _tab_battles(laps, session):
         fig_b.update_layout(**_fig_layout(height=400,
             title=dict(text=f"{battle_a} vs {battle_b} Lap Delta", font=TITLE_FONT, x=0.01),
             xaxis_title=dict(text="Lap", font=LABEL_FONT),
-            yaxis_title=dict(text=f"Delta ({battle_a} âˆ’ {battle_b}) in seconds", font=LABEL_FONT),
+            yaxis_title=dict(text=f"Delta ({battle_a} - {battle_b}) in seconds", font=LABEL_FONT),
             yaxis=dict(zeroline=True, zerolinecolor=ZERO_LINE, zerolinewidth=2,
                        tickfont=dict(size=11, color=TEXT_SECONDARY)),
             bargap=0.15,
@@ -892,9 +1023,7 @@ def _tab_battles(laps, session):
         show_plotly_chart(fig_b)
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # TAB 4: PERFORMANCE INSIGHTS
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 def _tab_sector_compare(laps, race_name, year, session_type):
     """Sector / corner insights and session-to-session pace comparison."""
     _render_sector_insights(laps)
@@ -1029,7 +1158,7 @@ def _tab_insights(laps, session):
     scores_df.index += 1
     scores_df.index.name = 'Rank'
 
-    # â”€â”€ Radar + leaderboard side-by-side â”€â”€
+    # -- Radar + leaderboard side-by-side --
     rc1, rc2 = st.columns([1, 1])
 
     with rc1:
