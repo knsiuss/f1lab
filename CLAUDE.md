@@ -30,6 +30,7 @@ src/
   sector.py                 # Sector/corner insights from lap sector times (R3)
   compare.py                # Session-to-session pace comparison (R3)
   pitwindow.py              # Pit-window radar (grid-search on whatif engine)
+  setupfingerprint.py       # Setup proxy from telemetry (traps + corner buckets)
   report.py                 # Dependency-free markdown weekend report
   replay.py                 # Animated position replay figure
   styles.py                 # Plotly design tokens + shared layout helpers

@@ -90,6 +90,7 @@ f1lab/
 │   ├── whatif.py           # Strategy what-if scenarios + undercut
 │   ├── pace.py             # Normalised pace, degradation, data-quality gates
 │   ├── pitwindow.py        # Pit-window radar per driver
+│   ├── setupfingerprint.py # Setup fingerprint from telemetry (aero/trade-off proxy)
 │   ├── briefing.py         # Pre-race briefing / post-race debrief
 │   ├── rival.py            # Rival watchlist, head-to-head, circuit insights
 │   ├── sector.py           # Sector insights from lap sector times
