@@ -30,15 +30,22 @@ def calculate_driver_stats(df: pd.DataFrame) -> pd.DataFrame:
             logger.error(f"Missing required columns: {missing}")
             return pd.DataFrame()
         
-        # Aggregate driver statistics
+        # Aggregate driver statistics. 'Set Fastest Lap' is optional: it is
+        # aggregated separately so a missing column degrades to zeros instead
+        # of voiding the whole table (a lambda cannot guard column selection).
         driver_stats = df.groupby('Driver').agg({
             'Points': ['sum', 'mean', 'count'],
             'Position': ['mean', 'min', 'max'],
             'Finished': 'sum',
-            'Set Fastest Lap': lambda x: (x == 'Yes').sum() if 'Set Fastest Lap' in df.columns else 0
         }).round(2)
-        
-        driver_stats.columns = ['Total_Points', 'Avg_Points', 'Races', 'Avg_Position', 'Best_Position', 'Worst_Position', 'Finishes', 'Fastest_Laps']
+        driver_stats.columns = ['Total_Points', 'Avg_Points', 'Races', 'Avg_Position', 'Best_Position', 'Worst_Position', 'Finishes']
+
+        if 'Set Fastest Lap' in df.columns:
+            fl = df[df['Set Fastest Lap'].astype(str).str.lower() == 'yes'] \
+                .groupby('Driver').size()
+            driver_stats['Fastest_Laps'] = fl
+        else:
+            driver_stats['Fastest_Laps'] = 0
         
         # Calculate wins and podiums
         wins = df[df['Position'] == 1].groupby('Driver').size()
@@ -70,35 +77,67 @@ def calculate_driver_stats(df: pd.DataFrame) -> pd.DataFrame:
 def calculate_team_stats(df: pd.DataFrame) -> pd.DataFrame:
     """Aggregate constructor statistics from race results."""
     logger.info("Calculating team statistics...")
-    team_agg = df.groupby('Team').agg({
-        'Points': ['sum', 'mean'],
-        'Driver': 'nunique',
-        'Position': 'mean',
-        'Finished': 'sum',
-        'Set Fastest Lap': lambda x: (x == 'Yes').sum() if 'Set Fastest Lap' in df.columns else 0,
-        'Starting Grid': 'mean'
-    }).round(2)
-    
-    team_agg.columns = ['_'.join(col).strip() for col in team_agg.columns.values]
-    
-    team_analysis = team_agg.rename(columns={
-        'Points_sum': 'Total_Points',
-        'Points_mean': 'Avg_Points_Per_Entry',
-        'Driver_nunique': 'Drivers',
-        'Position_mean': 'Avg_Position',
-        'Finished_sum': 'Finishes',
-        'Set Fastest Lap_<lambda>': 'Fastest_Laps',
-        'Starting Grid_mean': 'Avg_Grid'
-    })
-    
-    team_analysis['Points_Per_Driver'] = (team_analysis['Total_Points'] / team_analysis['Drivers']).round(1)
-    
-    races_count = df['Track'].nunique()
-    team_analysis['Total_Entries'] = team_analysis['Drivers'] * races_count
-    team_analysis['Finish_Rate'] = (team_analysis['Finishes'] / team_analysis['Total_Entries'] * 100).round(1)
-    
-    logger.info(f"Calculated stats for {len(team_analysis)} teams")
-    return team_analysis
+
+    try:
+        if df is None or df.empty:
+            logger.error("Cannot calculate team stats from empty DataFrame")
+            return pd.DataFrame()
+
+        required_cols = ['Team', 'Points', 'Driver', 'Finished']
+        missing = [col for col in required_cols if col not in df.columns]
+        if missing:
+            logger.error(f"Missing required columns: {missing}")
+            return pd.DataFrame()
+
+        team_agg = df.groupby('Team').agg({
+            'Points': ['sum', 'mean'],
+            'Driver': 'nunique',
+            'Position': 'mean',
+            'Finished': 'sum',
+            'Starting Grid': 'mean'
+        }).round(2)
+
+        team_agg.columns = ['_'.join(col).strip() for col in team_agg.columns.values]
+
+        team_analysis = team_agg.rename(columns={
+            'Points_sum': 'Total_Points',
+            'Points_mean': 'Avg_Points_Per_Entry',
+            'Driver_nunique': 'Drivers',
+            'Position_mean': 'Avg_Position',
+            'Finished_sum': 'Finishes',
+            'Starting Grid_mean': 'Avg_Grid'
+        })
+
+        # Optional column, aggregated separately (see calculate_driver_stats).
+        if 'Set Fastest Lap' in df.columns:
+            fl = df[df['Set Fastest Lap'].astype(str).str.lower() == 'yes'] \
+                .groupby('Team').size()
+            team_analysis['Fastest_Laps'] = fl
+        else:
+            team_analysis['Fastest_Laps'] = 0
+
+        team_analysis['Points_Per_Driver'] = (team_analysis['Total_Points'] / team_analysis['Drivers']).round(1)
+
+        races_count = df['Track'].nunique() if 'Track' in df.columns else 0
+        team_analysis['Total_Entries'] = team_analysis['Drivers'] * races_count
+        team_analysis['Finish_Rate'] = np.where(
+            team_analysis['Total_Entries'] > 0,
+            (team_analysis['Finishes'] / team_analysis['Total_Entries'] * 100).round(1),
+            0
+        )
+
+        # Stable output schema regardless of optional-column presence.
+        cols = ['Total_Points', 'Avg_Points_Per_Entry', 'Drivers', 'Avg_Position',
+                'Finishes', 'Fastest_Laps', 'Avg_Grid', 'Points_Per_Driver',
+                'Total_Entries', 'Finish_Rate']
+        team_analysis = team_analysis[cols]
+
+        logger.info(f"Calculated stats for {len(team_analysis)} teams")
+        return team_analysis
+
+    except Exception as e:
+        logger.exception(f"Error calculating team statistics: {e}")
+        return pd.DataFrame()
 
 def calculate_combined_constructor_standings(
     df_race: pd.DataFrame, 
