@@ -34,7 +34,6 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # Data directories
 DATA_DIR = PROJECT_ROOT / 'data'
 CACHE_DIR = PROJECT_ROOT / 'cache'
-NOTEBOOKS_DIR = PROJECT_ROOT / 'notebooks'
 LOGS_DIR = PROJECT_ROOT / 'logs'
 
 
@@ -55,10 +54,6 @@ class FastF1Config:
     """FastF1 API configuration."""
     cache_dir: Path = PROJECT_ROOT / 'f1_cache'
     default_year: int = 2025
-    retry_attempts: int = 3
-    retry_delay: float = 1.0
-    timeout: int = 30
-    cache_enabled: bool = True
     # Historical seasons supported by FastF1 API
     min_supported_year: int = 2018
     max_supported_year: int = 2025
@@ -542,12 +537,6 @@ for driver, details in DRIVER_DETAILS.items():
             
     if matched_name:
         DRIVER_PROFILES[matched_name].update(details)
-
-# Configure display names for social media
-SOCIAL_MEDIA_CONFIG = {
-    'twitter': {'icon': 'twitter', 'url_prefix': 'https://twitter.com/'},
-    'instagram': {'icon': 'instagram', 'url_prefix': 'https://instagram.com/'}
-}
 
 if __name__ == '__main__':
     # Print configuration summary
