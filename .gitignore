@@ -177,3 +177,5 @@ update_*.py
 generate_*.py
 mydiff.txt
 computed_replay_data/
+# Dev guide stays local only
+CLAUDE.md
