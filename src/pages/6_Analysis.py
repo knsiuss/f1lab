@@ -9,7 +9,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from shared import (
-    load_race_data, load_fastf1_session, setup_fastf1_cache,
+    load_fastf1_session, setup_fastf1_cache,
     show_plotly_chart, format_f1_time
 )
 from config import TEAM_COLORS, FASTF1_CONFIG, MODEL_CONFIG, SESSION_GUARD_HOURS, STREAMLIT_CONFIG
@@ -69,7 +69,7 @@ def _tab_setup_aero(year, selected_race):
     shown.columns = ['Driver', 'Team', 'Top speed (km/h)', 'Slow apex (km/h)',
                      'Medium apex (km/h)', 'Fast apex (km/h)', 'Braking (g)',
                      'Corners', 'Confidence']
-    st.dataframe(shown, use_container_width=True, hide_index=True)
+    st.dataframe(shown, width='stretch', hide_index=True)
 
     # Setup trade-off map: straight-line index vs cornering index.
     idx_cols = ['TopSpeedIdx', 'SlowApexIdx', 'MediumApexIdx', 'FastApexIdx']
@@ -156,7 +156,7 @@ def _tab_setup_aero(year, selected_race):
     keep = [c for c in ['Driver', 'Top speed delta', 'Slow apex delta',
                         'Medium apex delta', 'Fast apex delta',
                         'Braking delta (g)', 'Total |shift|'] if c in disp.columns]
-    st.dataframe(disp[keep], use_container_width=True, hide_index=True)
+    st.dataframe(disp[keep], width='stretch', hide_index=True)
 
 
 @st.cache_data(ttl=STREAMLIT_CONFIG.cache_ttl, show_spinner=False)
@@ -169,11 +169,6 @@ def _cached_shift(year, race_a, race_b):
 
 def page():
     year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
-    df = load_race_data(year)
-
-    if df is None or df.empty:
-        st.error("No data available")
-        return
 
     # -- Header --
     st.markdown(f"""
@@ -429,7 +424,7 @@ def _tab_pace(laps, session, race_name):
         table = fastest[cols_show].sort_values('LapTime')
         table['LapTime'] = table['LapTime'].apply(format_f1_time)
         table = table.rename(columns={'LapNumber': 'Lap', 'Compound': 'Tyre'})
-        st.dataframe(table, use_container_width=True, hide_index=True)
+        st.dataframe(table, width='stretch', hide_index=True)
 
     # -- Head-to-head pace --
     st.markdown("---")
@@ -544,7 +539,7 @@ def _tab_pace(laps, session, race_name):
             'BasePace': 'Base pace (s, est)', 'DegPerLap': 'Deg/lap (s, est)',
             'Level': 'Quality', 'Confidence': 'Confidence',
         })
-        st.dataframe(nshow, use_container_width=True, hide_index=True)
+        st.dataframe(nshow, width='stretch', hide_index=True)
 
     lr = long_run_quality(laps)
     if not lr.empty:
@@ -557,7 +552,7 @@ def _tab_pace(laps, session, race_name):
             'DegPerLap': 'Deg/lap (s, est)', 'Level': 'Quality',
             'Confidence': 'Confidence',
         })
-        st.dataframe(lshow, use_container_width=True, hide_index=True)
+        st.dataframe(lshow, width='stretch', hide_index=True)
 
 
 # TAB 2: STRATEGY & STINTS
@@ -747,7 +742,7 @@ def _tab_strategy(laps, session, race_name):
                         'Risk', 'Confidence']].copy()
         shown.columns = ['Rank', 'Scenario', 'Time (s, est)', 'Gap (s, est)',
                          'Stops', 'Risk', 'Confidence']
-        st.dataframe(shown, use_container_width=True, hide_index=True)
+        st.dataframe(shown, width='stretch', hide_index=True)
 
         und = undercut_delta(total_laps=int(total_laps_sim),
                              compound_new="HARD", compound_old=start_tire,
@@ -799,7 +794,7 @@ def _tab_strategy(laps, session, race_name):
                          'DegPerLap', 'Level', 'Confidence']].copy()
         disp.columns = ['Driver', 'Optimal stop', 'Window', 'Base pace (s, est)',
                         'Deg (s/lap, est)', 'Quality', 'Confidence']
-        st.dataframe(disp, use_container_width=True, hide_index=True)
+        st.dataframe(disp, width='stretch', hide_index=True)
         st.caption(
             "All figures estimated from this session's clean laps. The optimal "
             "lap is a modelling result under stated assumptions, not a team call."
@@ -1056,10 +1051,10 @@ def _render_sector_insights(laps):
     c_left, c_right = st.columns(2)
     with c_left:
         st.markdown("##### Per-driver sector stats")
-        st.dataframe(summary, use_container_width=True, hide_index=True)
+        st.dataframe(summary, width='stretch', hide_index=True)
     with c_right:
         st.markdown("##### Deficit to session-best sector (s)")
-        st.dataframe(deficits, use_container_width=True, hide_index=True)
+        st.dataframe(deficits, width='stretch', hide_index=True)
 
     st.caption(
         "Level reflects the number of clean laps behind each row (good ≥ 15, moderate ≥ 8, "
@@ -1120,7 +1115,7 @@ def _render_session_compare(laps, race_name, year, session_type):
         'BasePace_A': f'BasePace {session_type} (s)',
         'BasePace_B': f'BasePace {ref} (s)',
     })
-    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.dataframe(display, width='stretch', hide_index=True)
     st.caption(
         "All figures are estimates with a confidence level from each driver's clean-lap "
         "sample. Rows without enough clean laps in either session are excluded."
@@ -1196,7 +1191,7 @@ def _tab_insights(laps, session):
         display = scores_df[['Driver', 'Team', 'Pace', 'Consistency', 'Race Pace', 'Overall']]
         st.dataframe(
             display.style.background_gradient(subset=['Overall'], cmap='RdYlGn'),
-            use_container_width=True, height=400,
+            width='stretch', height=400,
         )
 
     # Tyre Degradation Analysis
@@ -1440,7 +1435,7 @@ def _tab_insights(laps, session):
                 return ''
 
         styled = sum_df.style.map(_color_deg, subset=['Deg (s/lap)'])
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+        st.dataframe(styled, width='stretch', hide_index=True)
 
         parsed = []
         for _, r in sum_df.iterrows():
@@ -1478,7 +1473,7 @@ def _tab_insights(laps, session):
                 if 'BLUE' in v: return 'background-color:#2980b9;color:white'
                 return ''
             st.dataframe(rc.style.map(_flag_color, subset=['Flag']),
-                         use_container_width=True, hide_index=True)
+                         width='stretch', hide_index=True)
         else:
             st.info("No race control messages")
     except Exception as e:

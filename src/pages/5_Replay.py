@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 from datetime import timedelta
 
-from shared import load_race_data, load_fastf1_session, show_plotly_chart, format_f1_time
+from shared import load_fastf1_session, show_plotly_chart, format_f1_time
 from config import FASTF1_CONFIG, SESSION_GUARD_HOURS
 from season_config import get_race_names, get_event_schedule_cached
 from replay import positions_by_lap, build_position_replay
@@ -36,12 +36,6 @@ def _event_state(year, race):
 
 def page():
     year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
-    df = load_race_data(year)
-    if df is None or df.empty:
-        st.error("No data available")
-        return
-
-    race_df = df[df['SessionType'] == 'Race'].copy() if 'SessionType' in df.columns else df.copy()
 
     st.markdown(f"""
     <div style="text-align:center;padding:1.2rem 0 0.8rem 0;">
@@ -91,8 +85,9 @@ def page():
             '<span style="color:#E10600;font-weight:700;letter-spacing:1px;">LIVE '
             '&mdash; best-effort timing</span>', unsafe_allow_html=True)
 
-    # Driver -> team map from the offline season data
-    team_map = race_df.groupby('Driver')['Team'].first().to_dict() if 'Driver' in race_df.columns else {}
+    # Driver -> team map straight from the session's lap table
+    team_map = (laps.groupby('Driver')['Team'].first().to_dict()
+                if 'Team' in laps.columns else {})
 
     drivers = sorted(laps['Driver'].dropna().unique())
     selected = st.multiselect("Drivers", drivers, default=drivers,
