@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import streamlit as st
 
 from shared import load_race_data
+from config import FASTF1_CONFIG
 from season_config import get_race_names
 from rival import (
     build_watchlist,
@@ -15,7 +16,7 @@ from rival import (
 
 
 def page():
-    year = st.session_state.get('selected_year', 2025)
+    year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
     df = load_race_data(year)
     if df is None or df.empty:
         st.error("No data available")

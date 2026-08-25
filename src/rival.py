@@ -34,8 +34,6 @@ ESTIMATED = "estimated"
 
 # Completed races two drivers must share before a head-to-head is shown.
 MIN_RACES_FOR_RIVALRY = 2
-# Completed races at a track before circuit insights are shown.
-MIN_RACES_FOR_TRACK = 1
 
 
 def _finishers(df: pd.DataFrame) -> pd.DataFrame:

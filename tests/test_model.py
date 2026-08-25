@@ -13,9 +13,7 @@ import pandas as pd
 import numpy as np
 import sys
 import os
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))

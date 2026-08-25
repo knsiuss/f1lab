@@ -45,12 +45,6 @@ st.set_page_config(
 # Initialize session state
 if 'selected_year' not in st.session_state:
     st.session_state.selected_year = FASTF1_CONFIG.default_year
-if 'driver_profile_selection' not in st.session_state:
-    st.session_state.driver_profile_selection = None
-if 'team_profile_selection' not in st.session_state:
-    st.session_state.team_profile_selection = None
-if 'race_detail_selection' not in st.session_state:
-    st.session_state.race_detail_selection = None
 
 # Custom CSS
 css_file = Path(__file__).parent / 'assets' / 'style.css'

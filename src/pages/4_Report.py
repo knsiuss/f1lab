@@ -39,7 +39,7 @@ def _session_extras(year, race):
                          "---|---|---|---:"]
                 for _, r in stints.head(16).iterrows():
                     lines.append(
-                        f"{r.get('Driver','')} | {r.get('Stint','')} | {r.get('Compound','')} | {r.get('LapNumber','')}"
+                        f"{r.get('Driver','')} | {r.get('Stint','')} | {r.get('Compound','')} | {r.get('Laps','')}"
                     )
                 sections.append("\n".join(lines))
         except Exception:
