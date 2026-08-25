@@ -11,18 +11,17 @@ from shared import (
     load_race_data, load_fastf1_session, setup_fastf1_cache,
     show_plotly_chart, format_f1_time
 )
-from config import TEAM_COLORS, FASTF1_CONFIG
+from config import TEAM_COLORS, FASTF1_CONFIG, MODEL_CONFIG
 from season_config import get_race_names
 from fastf1_extended import (
-    get_tyre_stints, get_pit_stops, get_race_control_messages,
-    get_detailed_pit_analysis, get_best_sectors
+    get_tyre_stints, get_pit_stops, get_race_control_messages
 )
 from model import RaceStrategySimulator
 from pace import normalised_pace_by_stint, long_run_quality
 from whatif import Scenario, compare_scenarios, undercut_delta
 from sector import sector_summary, sector_deficits
 from compare import compare_sessions
-import fastf1
+from pitwindow import pit_window
 from datetime import timedelta
 
 
@@ -128,7 +127,6 @@ def page():
 def _render_kpi_row(laps, session):
     col_a, col_b, col_c, col_d, col_e = st.columns(5)
 
-    times = laps['LapTime'].dropna()
     total_laps = int(laps['LapNumber'].nunique())
 
     fastest_row = laps.loc[laps['LapTime'].idxmin()]
@@ -518,6 +516,13 @@ def _tab_strategy(laps, session, race_name):
             popular = pit_stops['Lap'].mode().iloc[0] if not pit_stops['Lap'].mode().empty else '-'
             st.metric("Popular Lap", f"L{int(popular)}")
 
+        n_measured = int(pit_stops['Measured'].sum()) if 'Measured' in pit_stops.columns else len(pit_stops)
+        if n_measured < len(pit_stops):
+            st.caption(
+                f"{n_measured}/{len(pit_stops)} stop times measured from telemetry; "
+                f"the rest use the model default ({MODEL_CONFIG['pit_loss_sec']:.0f}s, estimated)."
+            )
+
         if pit_drv_filter:
             pit_filtered = pit_stops[pit_stops['Driver'].isin(pit_drv_filter)]
         else:
@@ -624,6 +629,50 @@ def _tab_strategy(laps, session, race_name):
     else:
         st.info("Not enough laps to compare scenarios.")
 
+    # -- Pit Window Radar --------------------------------------------------
+    st.markdown("---")
+    st.subheader("Pit Window Radar (estimated)")
+    st.caption(
+        "Per-driver optimal stop lap, grid-searched with the same strategy "
+        "engine as above but fitted to each driver's own clean laps (base "
+        "pace + degradation). The window is the range of stop laps within "
+        "1s of that optimum. Confidence follows the clean-lap sample: good "
+        "at 15+ laps, moderate at 8+, low at 2+."
+    )
+
+    pw_c1, pw_c2 = st.columns([1, 2])
+    with pw_c1:
+        n_stops_sel = st.radio("Stops modelled", [1, 2], index=0,
+                               horizontal=True, key="strat_pitstops")
+    with pw_c2:
+        st.caption(
+            "Drivers without a meaningful fitted degradation show a blank "
+            "window rather than an invented early stop."
+        )
+
+    pw = pit_window(laps, n_stops=int(n_stops_sel), tolerance=1.0)
+    if pw.empty:
+        st.info("Not enough clean-lap data to compute a pit window for this session.")
+    else:
+        pw_shown = pw.copy()
+        pw_shown['Window'] = pw_shown.apply(
+            lambda r: f"L{int(r['WindowStart'])}-L{int(r['WindowEnd'])}"
+            if pd.notna(r['WindowStart']) and pd.notna(r['WindowEnd']) else "-",
+            axis=1,
+        )
+        pw_shown['Optimal stop'] = pw_shown['OptimalLap'].apply(
+            lambda v: f"L{int(v)}" if pd.notna(v) else "-"
+        )
+        disp = pw_shown[['Driver', 'Optimal stop', 'Window', 'BasePace',
+                         'DegPerLap', 'Level', 'Confidence']].copy()
+        disp.columns = ['Driver', 'Optimal stop', 'Window', 'Base pace (s, est)',
+                        'Deg (s/lap, est)', 'Quality', 'Confidence']
+        st.dataframe(disp, use_container_width=True, hide_index=True)
+        st.caption(
+            "All figures estimated from this session's clean laps. The optimal "
+            "lap is a modelling result under stated assumptions, not a team call."
+        )
+
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 # TAB 3: RACE BATTLES
@@ -672,11 +721,10 @@ def _tab_battles(laps, session):
     fig_pos = go.Figure()
     pit_map_pos = {}
     try:
-        from fastf1_extended import get_pit_stops
         ps = get_pit_stops(session)
         if ps is not None and not ps.empty:
             for _, p in ps.iterrows():
-                d = p.get('Driver', ''); lap = int(p.get('LapNumber', 0))
+                d = p.get('Driver', ''); lap = int(p.get('Lap', 0))
                 if d not in pit_map_pos: pit_map_pos[d] = []
                 pit_map_pos[d].append(lap)
     except Exception: pass
@@ -717,45 +765,46 @@ def _tab_battles(laps, session):
                                  default=gap_default,
                                  max_selections=10, key="gap_drv")
 
-    if gap_drivers:
-        leader_data = None
-        min_time = float('inf')
-        for driver in gap_drivers:
-            dlaps = laps[(laps['Driver'] == driver) & laps['LapTime'].notna()].sort_values('LapNumber')
-            if not dlaps.empty:
-                cum = dlaps['LapTime'].dt.total_seconds().cumsum()
-                if cum.iloc[-1] < min_time:
-                    min_time = cum.iloc[-1]
-                    leader_data = (driver, dlaps, cum)
-
-        if leader_data:
-            leader_name, leader_laps, leader_cum = leader_data
-            leader_dict = dict(zip(leader_laps['LapNumber'], leader_cum))
-
-
-
-    fig_gap = go.Figure()
+    leader_data = None
+    min_time = float('inf')
     for driver in gap_drivers:
-        dlaps = laps[(laps['Driver'] == driver) & laps['LapTime'].notna()].sort_values('LapNumber').copy()
+        dlaps = laps[(laps['Driver'] == driver) & laps['LapTime'].notna()].sort_values('LapNumber')
         if not dlaps.empty:
-            team = dlaps['Team'].iloc[0] if 'Team' in dlaps.columns else ''
-            team_color = TEAM_COLORS.get(team, '#888')
-            compound_colors = [COMPOUND_COLORS.get(r.get('Compound', ''), team_color) for _, r in dlaps.iterrows()]
             cum = dlaps['LapTime'].dt.total_seconds().cumsum()
-            gaps = [c - leader_dict.get(l, c) for l, c in zip(dlaps['LapNumber'], cum)]
-            fig_gap.add_trace(go.Scatter(
-                x=dlaps['LapNumber'], y=gaps, mode='lines+markers', name=driver,
-                line=dict(color=team_color, width=2.5, shape='spline', smoothing=0.3),
-                marker=dict(size=6, color=compound_colors, opacity=0.8, line=dict(width=1, color=team_color)),
-                hovertemplate="<b>{}</b><br>Lap: %{{x}}<br>Gap: +%{{y:.2f}}s<extra></extra>".format(driver)))
-    fig_gap.update_layout(**_fig_layout(height=460,
-        title=dict(text="Gap to Leader ({})".format(leader_name), font=TITLE_FONT, x=0.01),
-        xaxis=dict(title=dict(text="Lap", font=LABEL_FONT), gridcolor=GRID, tickfont=dict(size=11, color=TEXT_SECONDARY)),
-        yaxis=dict(title=dict(text="Gap (s)", font=LABEL_FONT), zeroline=True,
-                   zerolinecolor='rgba(255,255,255,0.3)', zerolinewidth=2,
-                   gridcolor=GRID, tickfont=dict(size=11, color=TEXT_SECONDARY)),
-        hovermode='x unified', legend=dict(orientation="h", y=-0.18, font=dict(size=11))))
-    show_plotly_chart(fig_gap)
+            if cum.iloc[-1] < min_time:
+                min_time = cum.iloc[-1]
+                leader_data = (driver, dlaps, cum)
+
+    if not gap_drivers:
+        st.info("Select at least one driver.")
+    elif leader_data is None:
+        st.info("No valid lap times for the selected drivers.")
+    else:
+        leader_name, leader_laps, leader_cum = leader_data
+        leader_dict = dict(zip(leader_laps['LapNumber'], leader_cum))
+
+        fig_gap = go.Figure()
+        for driver in gap_drivers:
+            dlaps = laps[(laps['Driver'] == driver) & laps['LapTime'].notna()].sort_values('LapNumber').copy()
+            if not dlaps.empty:
+                team = dlaps['Team'].iloc[0] if 'Team' in dlaps.columns else ''
+                team_color = TEAM_COLORS.get(team, '#888')
+                compound_colors = [COMPOUND_COLORS.get(r.get('Compound', ''), team_color) for _, r in dlaps.iterrows()]
+                cum = dlaps['LapTime'].dt.total_seconds().cumsum()
+                gaps = [c - leader_dict.get(l, c) for l, c in zip(dlaps['LapNumber'], cum)]
+                fig_gap.add_trace(go.Scatter(
+                    x=dlaps['LapNumber'], y=gaps, mode='lines+markers', name=driver,
+                    line=dict(color=team_color, width=2.5, shape='spline', smoothing=0.3),
+                    marker=dict(size=6, color=compound_colors, opacity=0.8, line=dict(width=1, color=team_color)),
+                    hovertemplate="<b>{}</b><br>Lap: %{{x}}<br>Gap: +%{{y:.2f}}s<extra></extra>".format(driver)))
+        fig_gap.update_layout(**_fig_layout(height=460,
+            title=dict(text="Gap to Leader ({})".format(leader_name), font=TITLE_FONT, x=0.01),
+            xaxis=dict(title=dict(text="Lap", font=LABEL_FONT), gridcolor=GRID, tickfont=dict(size=11, color=TEXT_SECONDARY)),
+            yaxis=dict(title=dict(text="Gap (s)", font=LABEL_FONT), zeroline=True,
+                       zerolinecolor='rgba(255,255,255,0.3)', zerolinewidth=2,
+                       gridcolor=GRID, tickfont=dict(size=11, color=TEXT_SECONDARY)),
+            hovermode='x unified', legend=dict(orientation="h", y=-0.18, font=dict(size=11))))
+        show_plotly_chart(fig_gap)
 
     st.subheader("Battle Analysis")
 
