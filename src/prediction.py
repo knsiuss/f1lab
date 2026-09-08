@@ -47,8 +47,14 @@ def compute_team_pace(df: Optional[pd.DataFrame]) -> Dict[str, float]:
     avg = df.groupby('Team')['Position'].apply(
         lambda s: pd.to_numeric(s, errors='coerce').mean()
     )
+    # A team whose positions are all non-numeric averages to NaN. Drop it so
+    # it falls back to the neutral 0.5 in predict_race instead of poisoning
+    # the composite score and the softmax with NaN.
+    avg = avg.dropna()
+    if avg.empty:
+        return {}
     mx, mn = avg.max(), avg.min()
-    if pd.isna(mx) or mx == mn:
+    if mx == mn:
         return {t: 0.5 for t in avg.index}
     return {t: round((mx - v) / (mx - mn), 3) for t, v in avg.items()}
 
@@ -134,6 +140,12 @@ def predict_race(df: Optional[pd.DataFrame], grid: Dict[str, int]) -> pd.DataFra
         team = team_map.get(d, '')
         pace = team_pace.get(team, 0.5)
         fm = form.get(d, 0.5)
+        # Belt and braces: a NaN slipping through (e.g. from a future
+        # helper change) must degrade to neutral, never to a NaN score.
+        if pace is None or pd.isna(pace):
+            pace = 0.5
+        if fm is None or pd.isna(fm):
+            fm = 0.5
         score = W_GRID * grid_adv + W_TEAM * pace + W_FORM * fm
         rows.append({
             'Driver': d, 'Grid': grid_pos, 'Team': team,

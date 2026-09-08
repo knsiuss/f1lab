@@ -64,6 +64,35 @@ def _standings(df: pd.DataFrame, up_to_race: Optional[str] = None) -> Optional[p
     return s if not s.empty else None
 
 
+def _df_before(df: pd.DataFrame, race: Optional[str]) -> pd.DataFrame:
+    """Rows for tracks strictly before ``race`` (first-appearance order).
+
+    Unknown/None race falls back to the full frame so callers keep working
+    when the target GP is not in the data (e.g. a future race with no rows).
+    """
+    if not race or df is None or df.empty or 'Track' not in df.columns:
+        return df
+    order = list(dict.fromkeys(df['Track'].astype(str)))
+    if race not in order:
+        return df
+    return df[df['Track'].isin(order[:order.index(race)])]
+
+
+def _standings_through(df: pd.DataFrame, race: Optional[str]) -> Optional[pd.Series]:
+    """Cumulative driver points up to and including ``race`` itself."""
+    if df is None or df.empty or 'Driver' not in df.columns or 'Points' not in df.columns:
+        return None
+    g = df
+    if race and 'Track' in g.columns:
+        order = list(dict.fromkeys(g['Track'].astype(str)))
+        if race in order:
+            g = g[g['Track'].isin(order[:order.index(race) + 1])]
+    if g.empty:
+        return None
+    s = g.groupby('Driver')['Points'].sum().sort_values(ascending=False)
+    return s if not s.empty else None
+
+
 def _grid_delta_md(df: pd.DataFrame, race: str) -> List[str]:
     """Biggest gainer and loser versus the grid, as Markdown lines."""
     sub = _race_rows(df, race)
@@ -129,22 +158,24 @@ def pre_race_briefing(df: pd.DataFrame, grid: Dict[str, int],
         grid: {driver: grid position} for the upcoming race.
         race: grand prix name for the header (optional).
 
-    Returns:
-        Markdown string; every model figure is flagged estimated.
+    Only races strictly before ``race`` feed the standings, form, pace and
+    forecast — the briefing must not peek at the target race or later ones.
     """
     sections: List[str] = []
     if race:
         sections.append(f"**Pre-race briefing — {race}**")
 
-    leader = championship_leader_md(df)
+    past = _df_before(df, race)
+
+    leader = championship_leader_md(past)
     if leader:
         sections.append(leader)
 
-    form = form_guide_md(df)
+    form = form_guide_md(past)
     if form:
         sections.append(form)
 
-    pred = predict_race(df, grid)
+    pred = predict_race(past, grid)
     if not pred.empty:
         top3 = ", ".join(
             f"**{r['Driver']}** ({r['WinProb']}%)" for _, r in pred.head(3).iterrows()
@@ -198,7 +229,7 @@ def post_race_debrief(df: pd.DataFrame, race: str,
     sections.extend(_grid_delta_md(df, race))
 
     before = _standings(df, up_to_race=race)
-    after = _standings(df)
+    after = _standings_through(df, race)
     if before is not None and after is not None and len(after) > 0:
         lbefore, lafter = before.index[0], after.index[0]
         if lbefore != lafter:

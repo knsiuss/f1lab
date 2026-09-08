@@ -101,3 +101,19 @@ def test_forecast_vs_actual_columns(season_df):
     joined = forecast_vs_actual(pdf, {'NOR': 1, 'VER': 2, 'PIA': 3, 'LEC': 4})
     for col in ['Actual', 'PredictedPts', 'ActualPts']:
         assert col in joined.columns
+
+
+def test_team_pace_all_nan_team_falls_back_to_neutral():
+    # A team with only non-numeric positions averages to NaN: it must be
+    # dropped (neutral 0.5 fallback) rather than poisoning the softmax.
+    df = pd.DataFrame([
+        {'Track': 'R1', 'Position': 1, 'Driver': 'NOR', 'Team': 'McLaren',
+         'Starting Grid': 1, 'Points': 25},
+        {'Track': 'R1', 'Position': 'DNF', 'Driver': 'VER', 'Team': 'Red Bull',
+         'Starting Grid': 2, 'Points': 0},
+    ])
+    pace = compute_team_pace(df)
+    assert 'Red Bull' not in pace
+    pdf = predict_race(df, {'NOR': 1, 'VER': 2})
+    assert pdf['Score'].notna().all()
+    assert pdf['WinProb'].notna().all()

@@ -135,3 +135,36 @@ def test_debrief_championship_lead_change():
 
 def test_debrief_no_result():
     assert 'No recorded result' in post_race_debrief(_season(), 'Monaco')
+
+
+def test_pre_race_briefing_excludes_future_races():
+    # Standings after R2: A1 on 50. Full season would say 100 — that is
+    # future data leaking into an R3 briefing.
+    grid = {'A1': 1, 'C1': 2, 'A2': 3, 'B1': 4, 'B2': 5}
+    md = pre_race_briefing(_season(), grid, race='R3')
+    assert '50' in md
+    assert '100' not in md
+
+
+def test_debrief_after_standings_only_through_race():
+    # R3 flips the title back to A1; an R2 debrief must not see it.
+    rows = [
+        {'Track': 'R1', 'Position': 1, 'Driver': 'A1', 'Team': 'A',
+         'Starting Grid': 1, 'Points': 25},
+        {'Track': 'R1', 'Position': 2, 'Driver': 'B1', 'Team': 'B',
+         'Starting Grid': 2, 'Points': 18},
+        {'Track': 'R2', 'Position': 1, 'Driver': 'B1', 'Team': 'B',
+         'Starting Grid': 1, 'Points': 25},
+        {'Track': 'R2', 'Position': 2, 'Driver': 'C1', 'Team': 'C',
+         'Starting Grid': 2, 'Points': 18},
+        {'Track': 'R2', 'Position': 3, 'Driver': 'A1', 'Team': 'A',
+         'Starting Grid': 3, 'Points': 15},
+        {'Track': 'R3', 'Position': 1, 'Driver': 'A1', 'Team': 'A',
+         'Starting Grid': 1, 'Points': 25},
+        {'Track': 'R3', 'Position': 2, 'Driver': 'B1', 'Team': 'B',
+         'Starting Grid': 2, 'Points': 18},
+    ]
+    md = post_race_debrief(pd.DataFrame(rows), 'R2')
+    # Through R2: B1 43 vs A1 40 — the lead really changed at R2,
+    # even though A1 retakes it in R3 (65 vs 61 final).
+    assert 'Championship lead changes hands: **A1** → **B1**' in md
