@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 from shared import empty_state, load_race_data, show_plotly_chart
 from config import DATA_DIR, TEAM_COLORS, FASTF1_CONFIG, STREAMLIT_CONFIG
 from loader import load_race_grid
-from season_config import get_race_names
+from season_config import get_race_names, resolve_csv_track
 from styles import (
     GRID, LABEL_FONT, TEXT_PRIMARY, TEXT_SECONDARY, TITLE_FONT,
     fig_layout as _fig_layout,
@@ -69,7 +69,14 @@ def page():
     selected_race = st.selectbox("Grand Prix", all_races, key="pred_race",
                                  label_visibility="collapsed")
 
-    grid = load_race_grid(str(DATA_DIR), year, selected_race, race_df)
+    # The dropdown shows FastF1 event names ("Australian Grand Prix") while
+    # the CSVs use short track names ("Australia") — resolve before any
+    # Track-column lookup or the grid silently comes back empty.
+    csv_tracks = (list(dict.fromkeys(race_df['Track'].astype(str)))
+                  if 'Track' in race_df.columns else [])
+    csv_race = resolve_csv_track(year, selected_race, csv_tracks)
+
+    grid = load_race_grid(str(DATA_DIR), year, csv_race, race_df) if csv_race else {}
     if not grid:
         st.info(f"No grid information found for {selected_race}.")
         return
@@ -90,7 +97,7 @@ def page():
     with tabs[1]:
         _tab_fantasy(predicted)
     with tabs[2]:
-        _tab_actual(race_df, selected_race, predicted)
+        _tab_actual(race_df, csv_race or selected_race, predicted)
     with tabs[3]:
         _tab_backtest(race_df)
 

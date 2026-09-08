@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 from shared import empty_state, load_race_data, load_fastf1_session
 from config import DATA_DIR, TEAM_COLORS, FASTF1_CONFIG
 from loader import load_race_grid
-from season_config import get_race_names
+from season_config import get_race_names, resolve_csv_track
 from report import build_report
 from prediction import predict_race
 from briefing import pre_race_briefing, post_race_debrief
@@ -118,26 +118,32 @@ def page():
     selected_race = st.selectbox("Grand Prix", all_races, key="report_race",
                                  label_visibility="collapsed")
 
+    # Dropdown shows FastF1 event names; CSV lookups need short track names.
+    # The GP name is still used for the FastF1 session fetch below.
+    csv_tracks = (list(dict.fromkeys(race_df['Track'].astype(str)))
+                  if 'Track' in race_df.columns else [])
+    csv_race = resolve_csv_track(year, selected_race, csv_tracks)
+
     with st.spinner("Building report..."):
         extras, sections = _session_extras(year, selected_race)
         report_md = build_report(
-            year, selected_race, race_df,
+            year, csv_race or selected_race, race_df,
             extra=extras, extra_sections=sections,
         )
 
     st.markdown(report_md)
 
-    grid = load_race_grid(str(DATA_DIR), year, selected_race, race_df)
+    grid = load_race_grid(str(DATA_DIR), year, csv_race, race_df) if csv_race else {}
     forecast = predict_race(race_df, grid) if grid else None
 
     with st.expander("Pre-Race Briefing"):
         if grid:
-            st.markdown(pre_race_briefing(race_df, grid, race=selected_race))
+            st.markdown(pre_race_briefing(race_df, grid, race=csv_race))
         else:
             st.info("No grid available to build a pre-race briefing.")
 
     with st.expander("Post-Race Debrief"):
-        st.markdown(post_race_debrief(race_df, selected_race, forecast=forecast))
+        st.markdown(post_race_debrief(race_df, csv_race or selected_race, forecast=forecast))
 
     st.markdown("---")
     c1, c2 = st.columns(2)

@@ -124,6 +124,36 @@ def get_race_names(year):
     return _fallback_race_names(year)
 
 
+def resolve_csv_track(year, race, csv_tracks):
+    """Map a calendar display name to the Track value used in the season CSVs.
+
+    The race dropdowns show FastF1 event names (e.g. 'Australian Grand Prix')
+    while the CSVs use short track names (e.g. 'Australia'). Passing a
+    display name straight into a ``df['Track'] == race`` filter silently
+    matches nothing, which reads as "no data" instead of a name mismatch.
+
+    Strategy: exact match first, then positional mapping (season CSVs store
+    tracks in calendar order, so round N maps to the Nth CSV track), then a
+    case-insensitive match. Returns None when nothing matches (e.g. a future
+    race with no CSV rows yet) so callers degrade gracefully.
+    """
+    if not race:
+        return None
+    tracks = [str(t) for t in (csv_tracks or [])]
+    if race in tracks:
+        return race
+    try:
+        names = [r['name'] for r in get_season_calendar(year)]
+    except Exception:
+        names = []
+    if race in names:
+        idx = names.index(race)
+        if 0 <= idx < len(tracks):
+            return tracks[idx]
+    lowered = {t.lower(): t for t in tracks}
+    return lowered.get(str(race).lower())
+
+
 # ---------------------------------------------------------------------------
 # Fallback helpers
 # ---------------------------------------------------------------------------
