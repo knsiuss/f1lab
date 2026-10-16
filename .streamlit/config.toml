@@ -1,9 +1,9 @@
 [theme]
 base = "dark"
-primaryColor = "#E10600"
-backgroundColor = "#0E1117"
-secondaryBackgroundColor = "#1a1a2e"
-textColor = "#FFFFFF"
+primaryColor = "#D6F84C"
+backgroundColor = "#08080C"
+secondaryBackgroundColor = "#0E0E14"
+textColor = "#F4F6F8"
 font = "sans serif"
 
 [client]
@@ -18,12 +18,4 @@ port = 8501
 maxUploadSize = 200
 maxMessageSize = 200
 headless = true
-enableCORS = false
 enableXsrfProtection = true
-
-[global]
-# Enables or disables the Streamlit telemetry, which is usage statistics
-# sent to Streamlit.
-# If you care about privacy, disable this.
-logTelemetry = false
-dataFrameSerialization = "legacy"

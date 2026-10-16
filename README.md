@@ -94,8 +94,9 @@ f1lab/
 │   ├── briefing.py         # Pre-race briefing / post-race debrief
 │   ├── rival.py            # Rival watchlist, head-to-head, circuit insights
 │   ├── sector.py           # Sector insights from lap sector times
-│   ├── compare.py          # Session-to-session pace comparison
-│   ├── fastf1_extended.py  # FastF1 extraction (weather, pits, sectors, telemetry)
+│   ├── compare.py           # Session-to-session pace comparison
+│   ├── h2h.py               # FastF1-backed head-to-head season results
+│   ├── fastf1_extended.py   # FastF1 extraction (weather, pits, sectors, telemetry)
 │   ├── replay.py           # Animated position replay
 │   ├── report.py           # Markdown weekend report
 │   ├── styles.py           # Plotly design tokens

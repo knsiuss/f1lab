@@ -17,13 +17,82 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import STREAMLIT_CONFIG, FASTF1_CONFIG, _ensure_dirs
-from shared import (
-    load_race_data, get_total_points_combined,
-    setup_fastf1_cache
-)
+from shared import get_total_points_combined, setup_fastf1_cache
 from season_config import get_completed_races, get_season_calendar
 
 logger = logging.getLogger(__name__)
+
+PAGES = {
+    "Dashboard": ("pages/1_Home.py", ":material/home:"),
+    "Head-to-Head & Season": ("pages/2_HeadToHead.py", ":material/compare_arrows:"),
+    "Predictor & Fantasy": ("pages/3_Predictor.py", ":material/insights:"),
+    "Weekend Report": ("pages/4_Report.py", ":material/description:"),
+    "Live & Replay": ("pages/5_Replay.py", ":material/sensors:"),
+    "Analysis Center": ("pages/6_Analysis.py", ":material/monitoring:"),
+    "Competitor Analysis": ("pages/7_Competitor.py", ":material/groups:"),
+}
+
+
+def _nav_pages():
+    """St.Page objects built once.
+
+    ``st.navigation`` registers them and the sidebar's links reuse the same
+    objects, so ``st.page_link`` takes its object branch instead of resolving
+    a path against the pages registry, which is incomplete on a deep-link
+    entry and raises ``KeyError: url_pathname`` (Streamlit 1.61).
+    """
+    return [
+        st.Page(path, title=title, icon=icon, default=index == 0)
+        for index, (title, (path, icon)) in enumerate(PAGES.items())
+    ]
+def _season_snapshot(yr, total_all_points):
+    """Races done / calendar size / points for the sidebar stat block."""
+    races_done = len(get_completed_races(yr))
+    try:
+        races_total = len(get_season_calendar(yr))
+    except Exception as e:
+        logger.warning(f"Calendar unavailable for {yr}: {e}")
+        races_total = races_done
+    return {"races_done": races_done, "races_total": races_total,
+            "total_points": int(total_all_points or 0)}
+
+
+def _render_sidebar(snapshot, pages):
+    """Brand -> menu -> season -> stats -> credit, in the reference order."""
+    st.markdown("""
+    <div class="brand">
+        <div class="brand-mark">F1</div>
+        <div class="brand-text">
+            <div class="brand-name">F1 LAB</div>
+            <div class="brand-sub">Data · Strategy · Insights</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="side-label">Menu</div>', unsafe_allow_html=True)
+    for page in pages:
+        st.page_link(page)
+
+    st.markdown('<div class="side-label">Season</div>', unsafe_allow_html=True)
+    supported_years = FASTF1_CONFIG.get_supported_years()
+    current_year = st.session_state.selected_year
+    default_index = supported_years.index(current_year) if current_year in supported_years else -1
+    st.session_state.selected_year = st.selectbox(
+        "Season", supported_years, index=default_index, label_visibility="collapsed",
+    )
+
+    st.markdown('<div class="side-label">Season Snapshot</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="side-stat">
+        <span class="side-stat-label">Races</span>
+        <span class="side-stat-value">{snapshot['races_done']} / {snapshot['races_total']}</span>
+    </div>
+    <div class="side-stat">
+        <span class="side-stat-label">Total Points</span>
+        <span class="side-stat-value">{snapshot['total_points']:,}</span>
+    </div>
+    <div class="side-footer">F1 Lab · Public data analytics</div>
+    """, unsafe_allow_html=True)
 
 # Ensure directories exist, then setup cache
 _ensure_dirs()
@@ -55,48 +124,17 @@ if css_file.exists():
 
 def main():
     """Main application entry point."""
-    # Load data
     yr = st.session_state.selected_year
-    df = load_race_data(yr)
     _, _, total_all_points = get_total_points_combined(yr)
+    snapshot = _season_snapshot(yr, total_all_points)
 
-    # Sidebar
+    # Register the pages before the sidebar renders its links. Navigation
+    # stays hidden: the sidebar draws the menu from `pages` itself.
+    pages = _nav_pages()
+    pg = st.navigation(pages, position="hidden")
+
     with st.sidebar:
-        st.markdown(f"<h1 style='color:#E10600; margin:0; font-size:1.8rem;'>F1 {st.session_state.selected_year}</h1>", unsafe_allow_html=True)
-        st.markdown("---")
-
-        # Season selector -- FastF1-supported historical seasons.
-        # Pages degrade gracefully (show "No data available") for years
-        # without local CSV results.
-        supported_years = FASTF1_CONFIG.get_supported_years()
-        current_year = st.session_state.selected_year
-        default_index = supported_years.index(current_year) if current_year in supported_years else -1
-        st.session_state.selected_year = st.selectbox(
-            "Season", supported_years, index=default_index,
-        )
-        st.markdown("---")
-
-        if df is not None:
-            comp_races = get_completed_races(st.session_state.selected_year)
-            total_races = len(get_season_calendar(st.session_state.selected_year))
-            st.markdown(f"**Races:** {len(comp_races)}/{total_races}")
-            st.markdown(f"**Total Points:** {int(total_all_points):,}")
-
-        st.markdown("---")
-        st.caption("Created by **Maxvy**")
-
-    # Navigation
-    pg = st.navigation({
-        "F1 Lab": [
-            st.Page("pages/1_Home.py", title="Dashboard", default=True),
-            st.Page("pages/2_HeadToHead.py", title="Head-to-Head & Season"),
-            st.Page("pages/3_Predictor.py", title="Predictor & Fantasy"),
-            st.Page("pages/4_Report.py", title="Weekend Report"),
-            st.Page("pages/5_Replay.py", title="Live & Replay"),
-            st.Page("pages/6_Analysis.py", title="Analysis Center"),
-            st.Page("pages/7_Competitor.py", title="Competitor Analysis"),
-        ]
-    })
+        _render_sidebar(snapshot, pages)
     pg.run()
 
 
