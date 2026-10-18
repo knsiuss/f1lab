@@ -10,4 +10,4 @@ plotly>=5.10.0
 streamlit>=1.36.0
 
 # F1 data
-fastf1>=3.0.0
+fastf1>=3.8.2
