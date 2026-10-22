@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<!--
+  replay_player.html -- broadcast-style race replay for F1 Lab.
+
+  Rendered inside a Streamlit component iframe. The whole payload arrives as a
+  JSON blob in #payload, so nothing here touches the network and no interaction
+  triggers a Streamlit rerun: playback, scrubbing and driver selection are all
+  client-side.
+
+  Position data note: lap boundaries are measured, but where a car sits between
+  two boundaries is not. Track position is an estimate (see telemetry.progress_at)
+  and the panel footer says so.
+
+  Safety note: every string in the payload comes from the OpenF1 API, so every
+  string that reaches the DOM is escaped (see esc/html below). The Python side
+  escapes the JSON blob as well, but that only protects the <script> block --
+  the escaping here is what stops a driver name from becoming markup.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    /* Mirrors the app's design tokens (assets/style.css) so the player and
+       the page around it read as one surface. */
+    --bg: #0B0D12;
+    --panel: #12151C;
+    --panel-2: #171B24;
+    --line: rgba(255,255,255,.08);
+    --line-2: rgba(255,255,255,.05);
+    --accent: #E10600;
+    --text: #E8EAF0;
+    --dim: #9AA1AE;
+    --dimmer: #6B7280;
+    --good: #3ECF8E;
+    --warn: #FFB020;
+    --blue: #4C8DFF;
+    --gold: #FFD166;
+    --tower-h: 22px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+    font-size: 12px;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { display: flex; flex-direction: column; height: 100vh; gap: 8px; padding: 8px; }
+
+  /* ---------- header ---------- */
+  .header {
+    display: flex; align-items: stretch; gap: 14px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 12px; padding: 8px 14px; min-height: 58px;
+  }
+  .hdr-cell { display: flex; flex-direction: column; justify-content: center; }
+  .hdr-label { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+  .hdr-value { font-size: 15px; font-weight: 650; letter-spacing: .02em; margin-top: 2px; }
+  .hdr-value.big { font-size: 21px; font-variant-numeric: tabular-nums; }
+  .hdr-sep { width: 1px; background: var(--line); }
+  .hdr-flex { flex: 1; }
+  .flag-pill {
+    display: inline-block; padding: 2px 9px; border-radius: 6px;
+    font-size: 10px; font-weight: 700; letter-spacing: .1em;
+  }
+  .flag-GREEN { background: rgba(53,208,127,.16); color: var(--good); }
+  .flag-YELLOW { background: rgba(255,176,32,.16); color: var(--warn); }
+  .flag-SC, .flag-VSC { background: rgba(255,90,0,.16); color: #ff7a2f; }
+  .flag-RED { background: rgba(225,6,0,.2); color: #ff5a52; }
+  .flag-none { background: rgba(255,255,255,.05); color: var(--dimmer); }
+  .fl-row { display: flex; gap: 6px; align-items: baseline; }
+  .fl-name { color: var(--dim); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+  .fl-time { font-variant-numeric: tabular-nums; color: var(--good); font-weight: 600; }
+  .fl-lap { color: var(--dimmer); font-size: 10px; }
+
+  /* ---------- layout ---------- */
+  .grid { flex: 1; display: grid; grid-template-columns: 336px minmax(0,1fr) 330px; gap: 8px; min-height: 0; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  .panel-title {
+    font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--dim); padding: 8px 10px 7px; border-bottom: 1px solid var(--line-2);
+    display: flex; justify-content: space-between; align-items: center; flex: none;
+  }
+  .panel-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+  .panel-body::-webkit-scrollbar { width: 6px; }
+  .panel-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 3px; }
+  .panel-note {
+    flex: none; padding: 5px 10px 6px; font-size: 9.5px; color: var(--dim);
+    border-top: 1px solid var(--line-2);
+  }
+  .panel-note.warn { color: var(--warn); }
+
+  /* ---------- timing tower ---------- */
+  .tower-head, .row {
+    display: grid; align-items: center;
+    grid-template-columns: 20px 8px 1fr 52px 52px 30px 46px;
+    gap: 5px; padding: 0 8px; height: var(--tower-h);
+  }
+  .tower-head { height: 20px; font-size: 8.5px; letter-spacing: .08em; color: var(--dimmer);
+    text-transform: uppercase; border-bottom: 1px solid var(--line-2); position: sticky; top: 0;
+    background: var(--panel); z-index: 2; }
+  .row { cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.028); font-variant-numeric: tabular-nums; }
+  .row:hover { background: rgba(255,255,255,.04); }
+  .row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .row.sel { background: rgba(225,6,0,.13); box-shadow: inset 2px 0 0 var(--accent); }
+  .row.no-telemetry { opacity: .55; }
+  .row.p1 .pos { color: var(--gold); font-weight: 700; }
+  .c-pos { text-align: right; color: var(--dim); font-size: 11px; }
+  .c-pos.c-stale { color: var(--dimmer); font-style: italic; }
+  .c-bar { width: 3px; height: 13px; border-radius: 2px; }
+  .c-code { font-weight: 700; font-size: 11.5px; letter-spacing: .04em; }
+  .c-time { text-align: right; font-size: 11px; }
+  .c-dim { color: var(--dim); }
+  .c-dimmer { color: var(--dimmer); }
+  .c-gap { text-align: right; font-size: 11px; color: var(--text); }
+  .c-tyre { display: flex; gap: 3px; align-items: center; justify-content: flex-end; }
+  .tyre { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,.55);
+    display: inline-flex; align-items: center; justify-content: center; font-size: 7.5px; font-weight: 700; }
+  .age { color: var(--dimmer); font-size: 9.5px; }
+  .drs { color: var(--good); font-weight: 700; font-size: 8.5px; }
+  .out-lap { color: var(--accent); font-weight: 700; }
+  .purple { color: #c77dff; font-weight: 650; }
+
+  /* ---------- track map ---------- */
+  .map-wrap { flex: 1; position: relative; min-height: 0; }
+  #mapCanvas { width: 100%; height: 100%; display: block; }
+  .map-tag {
+    position: absolute; left: 10px; bottom: 8px; font-size: 9px; color: var(--dimmer);
+    letter-spacing: .06em; pointer-events: none;
+  }
+  .map-hint {
+    position: absolute; right: 10px; bottom: 8px; font-size: 9px; color: var(--dimmer);
+    pointer-events: none;
+  }
+
+  /* ---------- driver panel ---------- */
+  .drv-head { display: flex; align-items: center; gap: 8px; padding: 9px 10px 7px; }
+  .drv-bar { width: 3px; height: 26px; border-radius: 2px; }
+  .drv-name { font-size: 14px; font-weight: 700; }
+  .drv-sub { font-size: 10px; color: var(--dim); }
+  .drv-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px 10px; padding: 0 10px 8px; }
+  .stat-k { font-size: 8.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+  .stat-v { font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stat-u { font-size: 9px; color: var(--dim); margin-left: 2px; }
+  .trace-wrap { flex: 1; min-height: 0; position: relative; }
+  #traceCanvas { width: 100%; height: 100%; display: block; }
+  .trace-legend { display: flex; gap: 10px; font-size: 8.5px; letter-spacing: .06em;
+    align-items: center; }
+  .trace-legend i { width: 7px; height: 7px; border-radius: 2px; display: inline-block;
+    margin-right: 3px; }
+
+  /* ---------- speed trap ---------- */
+  .trap { padding: 4px 8px 6px; }
+  .trap-row { display: grid; grid-template-columns: 20px 34px 1fr 46px; gap: 6px;
+    align-items: center; height: 19px; font-variant-numeric: tabular-nums; }
+  .trap-bar { height: 5px; background: rgba(255,255,255,.06); border-radius: 3px; overflow: hidden; }
+  .trap-fill { height: 100%; border-radius: 3px; }
+  .trap-kmh { text-align: right; font-size: 10.5px; }
+  .trap-kmh span { color: var(--dimmer); font-size: 9px; }
+
+  /* ---------- race control ---------- */
+  .rc { padding: 4px 8px 6px; }
+  .rc-row { display: flex; gap: 7px; padding: 4px 2px; border-bottom: 1px solid rgba(255,255,255,.03); }
+  .rc-tag { flex: none; width: 52px; font-size: 8.5px; font-weight: 700; letter-spacing: .06em; padding-top: 1px; }
+  .rc-msg { font-size: 10.5px; color: var(--text); line-height: 1.35; }
+  .rc-t { font-size: 9px; color: var(--dimmer); font-variant-numeric: tabular-nums; margin-top: 1px; }
+
+  /* ---------- transport ---------- */
+  .transport {
+    display: flex; align-items: center; gap: 10px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; flex: none;
+  }
+  .btn {
+    background: rgba(255,255,255,.05); border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 5px 10px; font-size: 10.5px; font-weight: 600;
+    cursor: pointer; font-family: inherit; letter-spacing: .04em;
+  }
+  .btn:hover { background: rgba(255,255,255,.1); }
+  .btn:focus-visible { outline: 1px solid var(--accent); }
+  .btn.play { background: var(--accent); border-color: var(--accent); min-width: 62px; }
+  .btn.play:hover { background: #ff1a10; }
+  .scrub-wrap { flex: 1; position: relative; height: 26px; display: flex; align-items: center; }
+  #scrub { width: 100%; -webkit-appearance: none; appearance: none; height: 4px;
+    background: rgba(255,255,255,.12); border-radius: 2px; outline: none; cursor: pointer; }
+  #scrub::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px;
+    border-radius: 50%; background: #fff; cursor: grab; box-shadow: 0 0 0 3px rgba(225,6,0,.35); }
+  #scrub::-moz-range-thumb { width: 12px; height: 12px; border: none; border-radius: 50%; background: #fff; }
+  .tcode { font-variant-numeric: tabular-nums; font-size: 11px; color: var(--dim); letter-spacing: .04em; }
+  .tcode b { color: var(--text); font-weight: 650; }
+  .select {
+    background: rgba(255,255,255,.05); border: 1px solid var(--line); color: var(--text);
+    border-radius: 8px; padding: 5px 7px; font-size: 10.5px; font-family: inherit; cursor: pointer;
+  }
+  .kbd { font-size: 8.5px; color: var(--dimmer); letter-spacing: .05em; }
+  .empty { padding: 26px 14px; text-align: center; color: var(--dim); font-size: 11px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div id="root">
+  <div class="header" id="header"></div>
+  <div class="grid">
+    <div class="panel">
+      <div class="panel-title"><span>Timing Tower</span><span id="towerNote"></span></div>
+      <div class="panel-body" id="tower"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;min-height:0;">
+      <div class="panel" style="flex:1;">
+        <div class="panel-title"><span id="mapTitle">Track</span><span id="mapSub"></span></div>
+        <div class="map-wrap">
+          <canvas id="mapCanvas" role="img" aria-label="Circuit map with the estimated position of every car"></canvas>
+          <div class="map-tag">Position estimated from lap progress</div>
+          <div class="map-hint" id="mapHint"></div>
+        </div>
+        <div class="panel-note" id="coverageNote"></div>
+      </div>
+      <div class="panel" style="flex:none;max-height:170px;">
+        <div class="panel-title"><span>Speed Trap</span><span>km/h</span></div>
+        <div class="panel-body"><div class="trap" id="trap"></div></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;min-height:0;">
+      <div class="panel" style="flex:1.25;">
+        <div class="panel-title"><span>Driver Telemetry</span>
+          <span class="trace-legend">
+            <span><i style="background:var(--good)"></i>SPEED</span>
+            <span><i style="background:var(--blue)"></i>THROTTLE</span>
+            <span><i style="background:#ff4d4d"></i>BRAKE</span>
+            <span id="traceHint"></span>
+          </span></div>
+        <div class="drv-head" id="drvHead"></div>
+        <div class="drv-stats" id="drvStats"></div>
+        <div class="trace-wrap">
+          <canvas id="traceCanvas" role="img" aria-label="Speed, throttle and brake trace for the selected driver"></canvas>
+        </div>
+      </div>
+      <div class="panel" style="flex:1;">
+        <div class="panel-title"><span>Race Control</span><span id="rcCount"></span></div>
+        <div class="panel-body"><div class="rc" id="rc"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="transport">
+    <button class="btn play" id="playBtn">PLAY</button>
+    <button class="btn" id="backBtn">-10s</button>
+    <button class="btn" id="fwdBtn">+10s</button>
+    <div class="scrub-wrap"><input type="range" id="scrub" min="0" max="1000" value="0"
+      aria-label="Replay position"></div>
+    <span class="tcode"><b id="tNow">00:00:00</b> / <span id="tEnd">00:00:00</span></span>
+    <select class="select" id="speedSel" aria-label="Playback speed">
+      <option value="0.25">0.25x</option>
+      <option value="0.5">0.5x</option>
+      <option value="1">1x</option>
+      <option value="2" selected>2x</option>
+      <option value="4">4x</option>
+      <option value="8">8x</option>
+    </select>
+    <button class="btn" id="lapBtn">NEXT LAP</button>
+    <span class="kbd">SPACE play &middot; &larr;&rarr; seek &middot; L next lap</span>
+  </div>
+</div>
+<script type="application/json" id="payload">__PAYLOAD__</script>
+<script>
+"use strict";
+
+/* ---------------- escaping ---------------- */
+// Everything in the payload comes from the OpenF1 API, so nothing is trusted:
+// these helpers are the only way a string reaches innerHTML.
+const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function esc(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).replace(/[&<>"']/g, ch => ESCAPES[ch]);
+}
+// Marks a string as already-safe markup so a tagged template can embed it.
+function raw(markup) { return { __html: String(markup) }; }
+// Tagged template: every interpolated value is escaped unless it is a number,
+// a boolean, or explicitly marked raw.
+function html(strings, ...values) {
+  return strings.reduce((out, chunk, i) => {
+    if (i >= values.length) return out + chunk;
+    const v = values[i];
+    if (v && typeof v === 'object' && v.__html !== undefined) return out + chunk + v.__html;
+    const text = (typeof v === 'number' || typeof v === 'boolean') ? String(v) : esc(v);
+    return out + chunk + text;
+  }, '');
+}
+
+/* ---------------- typed-array decoding ---------------- */
+function decode(b64, Type) {
+  const bin = atob(b64);
+  // The buffer holds bytes, the typed array holds elements: allocating
+  // bin.length *elements* doubled every multi-byte channel and left a tail
+  // of zeros behind it.
+  const out = new Type(bin.length / Type.BYTES_PER_ELEMENT);
+  const bytes = new Uint8Array(out.buffer);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/* ---------------- payload ---------------- */
+let P = null;
+let CH = null;
+let N = 0, HZ = 1, T0 = 0, ND = 0, DURATION = 0;
+let TRACK_X = [], TRACK_Y = [];
+let SEG = [], CUM = new Float64Array(1), TRACK_LEN = 1;
+const FRAC_STEPS = 1024;
+let IDX_AT_FRAC = new Int32Array(FRAC_STEPS + 1);
+const BY_NUM = {};
+const ROWS = new Map();
+let selected = null;
+
+function readPayload() {
+  P = JSON.parse(document.getElementById('payload').textContent);
+  CH = {
+    frac: decode(P.channels.frac, Uint16Array),
+    speed: decode(P.channels.speed, Uint8Array),
+    throttle: decode(P.channels.throttle, Uint8Array),
+    brake: decode(P.channels.brake, Uint8Array),
+    drs: decode(P.channels.drs, Uint8Array),
+    gear: decode(P.channels.gear, Int8Array),
+  };
+  N = P.grid.n; HZ = P.grid.hz; T0 = P.grid.t0; ND = P.drivers.length;
+  // The payload's duration is the *span* of the timeline: the grid can start
+  // before the session origin (the formation window), so an absolute end here
+  // would silently truncate the last seconds of every session.
+  DURATION = P.meta.duration;
+}
+
+/* ---------------- track geometry ---------------- */
+function buildTrack() {
+  TRACK_X = P.track.xs || [];
+  TRACK_Y = P.track.ys || [];
+  // Arc-length lookup so a car at lap fraction f lands at the same *distance*
+  // around the circuit; sampling by index would bunch cars where the source
+  // polyline is densest, which is exactly where they are slowest.
+  SEG = []; CUM = new Float64Array(Math.max(TRACK_X.length, 1));
+  for (let i = 1; i < TRACK_X.length; i++) {
+    const d = Math.hypot(TRACK_X[i] - TRACK_X[i-1], TRACK_Y[i] - TRACK_Y[i-1]);
+    SEG.push(d); CUM[i] = CUM[i-1] + d;
+  }
+  TRACK_LEN = CUM[Math.max(0, TRACK_X.length - 1)] || 1;
+  // Fraction-to-segment lookup: every car's lap fraction is interpolated on
+  // every frame, so a binary search per car per frame would be wasted work.
+  IDX_AT_FRAC = new Int32Array(FRAC_STEPS + 1);
+  for (let k = 0; k <= FRAC_STEPS; k++) {
+    const target = (k / FRAC_STEPS) * TRACK_LEN;
+    let lo = 0, hi = SEG.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (CUM[mid + 1] < target) lo = mid + 1; else hi = mid; }
+    IDX_AT_FRAC[k] = lo;
+  }
+}
+function trackPoint(frac) {
+  if (TRACK_X.length < 2) return [0, 0];
+  const f = Math.min(Math.max(frac, 0), 1);
+  const target = f * TRACK_LEN;
+  // The table gives the segment for a rounded fraction; refine from there so
+  // the rendered position keeps the payload's precision instead of snapping
+  // to 1/1024 of a lap (about five metres on a five kilometre circuit).
+  const k = Math.max(0, Math.min(FRAC_STEPS, Math.round(f * FRAC_STEPS)));
+  let i = IDX_AT_FRAC[k];
+  while (i > 0 && CUM[i] > target) i--;
+  while (i < SEG.length - 1 && CUM[i + 1] < target) i++;
+  const span = SEG[i] || 1;
+  const local = (target - CUM[i]) / span;
+  return [TRACK_X[i] + (TRACK_X[i + 1] - TRACK_X[i]) * local,
+          TRACK_Y[i] + (TRACK_Y[i + 1] - TRACK_Y[i]) * local];
+}
+
+/* ---------------- per-driver indexes ---------------- */
+function stepHold(ts, vs, t) {
+  let lo = 0, hi = ts.length - 1;
+  if (!ts.length || t < ts[0]) return vs.length ? vs[0] : null;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (ts[mid] <= t) lo = mid; else hi = mid - 1; }
+  return vs[lo];
+}
+// Index of the position reading in force at time t, or -1 when the feed has
+// nothing to say yet. The feed is sampled only a handful of times per race,
+// so the reading in force can be tens of minutes old.
+function positionIndex(d, t) {
+  const ts = d.pT;
+  if (!ts.length || t < ts[0]) return -1;
+  let lo = 0, hi = ts.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (ts[mid] <= t) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+function buildDriverIndexes() {
+  for (const d of P.drivers) {
+    const laps = d.laps.filter(l => l.start !== null && l.start !== undefined)
+                      .sort((a, b) => a.start - b.start);
+    d.starts = laps.map(l => l.start);
+    d.durs = laps.map(l => l.duration || 0);
+    d.lapNo = laps.map(l => l.number);
+    // The measured pit-out flag, not a guess from a missing lap duration.
+    d.out = laps.map(l => !!l.out);
+    // Best-so-far prefix minimum: scrubbing then costs one array read. Both
+    // the index (for the time) and the lap number (for the highlight) are
+    // kept -- the lap number is what the fastest-lap marker compares against.
+    d.bestNo = []; d.bestLapNo = []; let bestIdx = -1;
+    for (let i = 0; i < laps.length; i++) {
+      const dur = laps[i].duration;
+      if (dur && (bestIdx < 0 || dur < d.durs[bestIdx])) bestIdx = i;
+      d.bestNo.push(bestIdx);
+      d.bestLapNo.push(bestIdx >= 0 ? d.lapNo[bestIdx] : null);
+    }
+    d.iT = d.intervals.map(r => r[0]);
+    d.iGap = d.intervals.map(r => r[1]);
+    d.iAhead = d.intervals.map(r => r[2]);
+    d.pT = d.positions.map(r => r[0]);
+    d.pV = d.positions.map(r => r[1]);
+  }
+  P.drivers.forEach((d, i) => { d.slot = i; BY_NUM[d.number] = d; });
+}
+
+function currentLapIndex(d, t) {
+  const s = d.starts;
+  if (!s.length) return -1;
+  let lo = 0, hi = s.length - 1;
+  if (t < s[0]) return -1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (s[mid] <= t) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+function stateAt(d, t) {
+  const li = currentLapIndex(d, t);
+  const done = li - 1;
+  const outLap = li >= 0 && !!d.out[li];
+  const bestIdx = done >= 0 ? d.bestNo[done] : -1;
+  const posIdx = positionIndex(d, t);
+  return {
+    lap: li >= 0 ? d.lapNo[li] : (d.lapNo.length ? d.lapNo[0] : 0),
+    lastTime: done >= 0 ? d.durs[done] : null,
+    lastNo: done >= 0 ? d.lapNo[done] : null,
+    bestTime: bestIdx >= 0 ? d.durs[bestIdx] : null,
+    bestNo: bestIdx >= 0 ? d.lapNo[bestIdx] : null,
+    outLap,
+    gap: stepHold(d.iT, d.iGap, t),
+    ahead: stepHold(d.iT, d.iAhead, t),
+    pos: posIdx >= 0 ? d.pV[posIdx] : null,
+    posAge: posIdx >= 0 ? t - d.pT[posIdx] : null,
+  };
+}
+
+/* ---------------- tyres ---------------- */
+function stintAt(d, lap) {
+  for (const s of d.stints) {
+    if (s.from === null || s.from === undefined) continue;
+    if (lap >= s.from && (s.to === null || lap <= s.to)) return s;
+  }
+  return d.stints.length ? d.stints[d.stints.length - 1] : null;
+}
+const COMPOUND_LETTER = { SOFT: 'S', MEDIUM: 'M', HARD: 'H', INTERMEDIATE: 'I', WET: 'W' };
+function tyreAt(d, lap) {
+  const s = stintAt(d, lap);
+  if (!s) return null;
+  return { ...s, age: (s.age || 0) + Math.max(0, lap - (s.from || 0)) };
+}
+function readableText(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return '#fff';
+  const n = parseInt(m[1], 16);
+  const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  return lum > 0.55 ? '#0B0D12' : '#fff';
+}
+
+/* ---------------- formatting ---------------- */
+function clock(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = String(Math.floor(sec / 3600)).padStart(2, '0');
+  const m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
+  const s = String(sec % 60).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+function ageText(sec) {
+  if (sec === null || sec === undefined) return 'unknown';
+  if (sec < 90) return `${Math.round(sec)}s old`;
+  if (sec < 5400) return `${Math.round(sec / 60)}m old`;
+  return `${(sec / 3600).toFixed(1)}h old`;
+}
+function lapTime(v) {
+  if (v === null || v === undefined || !isFinite(v)) return '--.---';
+  return `${Math.floor(v / 60)}:${(v % 60).toFixed(3).padStart(6, '0')}`;
+}
+function gapStr(v) {
+  if (v === null || v === undefined || !isFinite(v)) return '';
+  if (v <= 0.0005) return 'LEADER';
+  return `+${v.toFixed(3)}`;
+}
+
+/* ---------------- playback ---------------- */
+let t = 0, playing = false, speed = 2;
+let currentT = 0, lastFrame = 0, lastPanelSecond = -1, dirty = true;
+
+function frameAt(time) {
+  const f = (time - T0) * HZ;
+  const i0 = Math.max(0, Math.min(N - 1, Math.floor(f)));
+  const i1 = Math.min(N - 1, i0 + 1);
+  return [i0, i1, Math.max(0, Math.min(1, f - i0))];
+}
+function fracOf(slot, i0, i1, a) {
+  const base = slot * N;
+  const f0 = CH.frac[base + i0] / 65535, f1 = CH.frac[base + i1] / 65535;
+  let d = f1 - f0;                       // unwrap the lap boundary
+  if (d > 0.5) d -= 1; else if (d < -0.5) d += 1;
+  return (((f0 + d * a) % 1) + 1) % 1;
+}
+
+/* ---------------- header ---------------- */
+const FLAG_CLASS = {
+  'GREEN': 'flag-GREEN', 'YELLOW': 'flag-YELLOW', 'DOUBLE YELLOW': 'flag-YELLOW',
+  'RED': 'flag-RED', 'SC': 'flag-SC', 'VSC': 'flag-VSC',
+};
+function flagClass(flag) {
+  // Raw API text can be "DOUBLE YELLOW"; a class name built from it would
+  // split into two bogus classes, so the flags are mapped explicitly.
+  return FLAG_CLASS[String(flag || '').toUpperCase()] || 'flag-none';
+}
+function flagAt(time) {
+  // Track status is the last flag that was raised; other categories (penalties,
+  // notes) belong in the feed below, not on the status pill.
+  let status = { flag: null, lap: null };
+  for (const r of P.raceControl) {
+    if (r.t > time) break;
+    if (r.category === 'Flag' && r.flag) status = { flag: r.flag, lap: r.lap };
+  }
+  return status;
+}
+function renderHeader(time, rows) {
+  const m = P.meta, fl = flagAt(time);
+  const fastest = m.fastest[0];
+  // The leader is the first row of the same ordering the tower uses, so the
+  // header can never disagree with the order below it.
+  const leader = rows && rows.length ? rows[0] : null;
+  const lapNow = leader ? leader.s.lap : 0;
+  const flagCls = flagClass(fl.flag);
+  const fastestHtml = fastest
+    ? `<span class="fl-name">${esc((BY_NUM[fastest.driver] || {}).acronym || '')}</span>` +
+      `<span class="fl-time">${esc(lapTime(fastest.time))}</span>` +
+      `<span class="fl-lap">L${esc(fastest.lap)}</span>`
+    : '<span class="fl-lap">no lap recorded</span>';
+  document.getElementById('header').innerHTML = html`
+    <div class="hdr-cell">
+      <div class="hdr-label">Session</div>
+      <div class="hdr-value">${m.circuit || m.name}</div>
+      <div class="hdr-label" style="margin-top:2px">${m.year} &middot; ${m.name} &middot; ${m.country || ''}</div>
+    </div>
+    <div class="hdr-sep"></div>
+    <div class="hdr-cell">
+      <div class="hdr-label">Race Time</div>
+      <div class="hdr-value big">${clock(time - T0)}</div>
+    </div>
+    <div class="hdr-sep"></div>
+    <div class="hdr-cell">
+      <div class="hdr-label">Lap</div>
+      <div class="hdr-value big">${lapNow}<span style="color:var(--dimmer);font-size:13px">/${m.totalLaps}</span></div>
+    </div>
+    <div class="hdr-sep"></div>
+    <div class="hdr-cell">
+      <div class="hdr-label">Track Status</div>
+      <div class="fl-row"><span class="flag-pill ${flagCls}">${fl.flag || '—'}</span>
+      <span class="fl-lap">${fl.lap ? 'Lap ' + fl.lap : ''}</span></div>
+    </div>
+    <div class="hdr-sep"></div>
+    <div class="hdr-cell hdr-flex">
+      <div class="hdr-label">Fastest Lap</div>
+      <div class="fl-row">${raw(fastestHtml)}</div>
+    </div>`;
+}
+
+/* ---------------- timing tower ---------------- */
+// Rows are built once and reordered with CSS `order`, so a position swap costs
+// two property writes instead of tearing down twenty rows every second.
+const towerEl = document.getElementById('tower');
+const towerNote = document.getElementById('towerNote');
+towerEl.style.display = 'flex';
+towerEl.style.flexDirection = 'column';
+towerEl.insertAdjacentHTML('beforeend', `<div class="tower-head">
+  <span style="text-align:right">P</span><span></span><span>Driver</span>
+  <span style="text-align:right">Last</span><span style="text-align:right">Best</span>
+  <span style="text-align:right">Int</span><span style="text-align:right">Tyre</span></div>`);
+
+function buildTowerRows() {
+  for (const d of P.drivers) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.setAttribute('aria-label', `Select ${d.acronym || d.number}`);
+    row.innerHTML = `
+      <span class="c-pos"></span>
+      <span class="c-bar"></span>
+      <span class="c-code"></span>
+      <span class="c-last"></span>
+      <span class="c-best"></span>
+      <span class="c-int"></span>
+      <span class="c-tyre"></span>`;
+    row.children[1].style.background = d.colour;
+    row.children[2].style.color = d.colour;
+    row.children[2].textContent = d.acronym || String(d.number);
+    const pick = () => { selected = d; dirty = true; };
+    row.onclick = pick;
+    row.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); }
+    };
+    towerEl.appendChild(row);
+    ROWS.set(d.number, row);
+  }
+}
+
+function orderAt(time) {
+  const [i0, i1, a] = frameAt(time);
+  return P.drivers.map(d => {
+    const s = stateAt(d, time);
+    return { d, s, frac: fracOf(d.slot, i0, i1, a) };
+  }).sort((a, b) => {
+    // Ordering falls back through measured sources rather than through lap
+    // progress. The position feed is dense where OpenF1 records it and empty
+    // where it does not, gaps to the leader are sampled all race, and lap
+    // progress is only a last resort: a car in the pits has zero progress yet
+    // keeps its place, so sorting on it alone would sink every stopper.
+    const pa = a.s.pos, pb = b.s.pos;
+    if (pa && pb && pa !== pb) return pa - pb;
+    const ga = a.s.gap, gb = b.s.gap;
+    if (ga !== null && gb !== null && Math.abs(ga - gb) > 0.001) return ga - gb;
+    if (a.s.lap !== b.s.lap) return b.s.lap - a.s.lap;
+    return b.frac - a.frac;
+  });
+}
+function renderTower(time, rows) {
+  const bestOverall = P.meta.fastest[0];
+  const [i0] = frameAt(time);
+  let oldest = 0;
+
+  rows.forEach((r, idx) => {
+    const { d, s } = r, row = ROWS.get(d.number);
+    const pos = s.pos || idx + 1;
+    const stale = s.posAge !== null && s.posAge > 60;
+    if (s.posAge !== null && s.posAge > oldest) oldest = s.posAge;
+    row.style.order = idx;
+    row.className = 'row' + (pos === 1 ? ' p1' : '') +
+                     (selected && d.number === selected.number ? ' sel' : '') +
+                     (d.hasTelemetry === false ? ' no-telemetry' : '');
+    row.children[0].textContent = pos;
+    row.children[0].className = 'c-pos' + (stale ? ' c-stale' : '');
+    row.children[0].title = stale
+      ? `position feed ${ageText(s.posAge)} - OpenF1 samples it rarely`
+      : '';
+
+    // The fastest-lap marker compares lap NUMBERS: the index of the best lap
+    // in the array is one less than its lap number, so comparing the index
+    // could never match.
+    const isPurple = s.bestNo !== null && s.bestNo !== undefined && bestOverall &&
+                     d.number === bestOverall.driver && s.bestNo === bestOverall.lap;
+    const last = row.children[3], best = row.children[4];
+    last.className = s.outLap ? 'out-lap' : (isPurple ? 'purple' : 'c-time');
+    last.textContent = s.outLap ? 'OUT' : lapTime(s.lastTime);
+    best.className = 'c-time' + (s.bestTime === null ? ' c-dimmer' : '');
+    best.textContent = lapTime(s.bestTime);
+    row.children[5].textContent =
+      s.ahead === null ? '' : (s.ahead > 0.05 ? '+' + s.ahead.toFixed(1) : '');
+
+    const tyre = tyreAt(d, s.lap);
+    const drs = d.hasTelemetry === false ? 0 : CH.drs[d.slot * N + i0];
+    const cell = row.children[6];
+    cell.textContent = '';
+    if (drs) {
+      const tag = document.createElement('span');
+      tag.className = 'drs';
+      tag.textContent = 'DRS';
+      cell.appendChild(tag);
+    }
+    if (tyre) {
+      const badge = document.createElement('span');
+      badge.className = 'tyre';
+      badge.style.background = tyre.colour;
+      badge.style.color = readableText(tyre.colour);
+      badge.textContent = COMPOUND_LETTER[tyre.compound] || '?';
+      const age = document.createElement('span');
+      age.className = 'age';
+      age.textContent = String(tyre.age);
+      cell.appendChild(badge);
+      cell.appendChild(age);
+    }
+  });
+
+  // The position feed is sampled a handful of times per race, so the tower
+  // says how old the numbers on it are instead of pretending to be live.
+  towerNote.textContent = ND + ' drivers · positions ' + ageText(oldest);
+  towerNote.className = oldest > 60 ? 'warn' : '';
+}
+
+/* ---------------- track map ---------------- */
+const mapCanvas = document.getElementById('mapCanvas');
+const mctx = mapCanvas.getContext('2d');
+let MAP = null;
+function fitMap() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = mapCanvas.clientWidth, h = mapCanvas.clientHeight;
+  mapCanvas.width = w * dpr; mapCanvas.height = h * dpr;
+  mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (!TRACK_X.length || !w || !h) { MAP = null; return; }
+  const xs = TRACK_X, ys = TRACK_Y;
+  const pad = 26;
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const s = Math.min((w - pad * 2) / (maxX - minX || 1), (h - pad * 2) / (maxY - minY || 1));
+  MAP = { s, ox: (w - (maxX - minX) * s) / 2 - minX * s, oy: (h - (maxY - minY) * s) / 2 - minY * s,
+          w, h, minX, maxX, minY, maxY };
+}
+const mx = v => v * MAP.s + MAP.ox;
+const my = v => v * MAP.s + MAP.oy;
+
+function renderMap(time, rows) {
+  if (!MAP) fitMap();
+  if (!MAP) return;
+  const { w, h } = MAP;
+  mctx.clearRect(0, 0, w, h);
+
+  // circuit
+  mctx.lineJoin = 'round'; mctx.lineCap = 'round';
+  mctx.beginPath();
+  for (let i = 0; i < TRACK_X.length; i++) {
+    const px = mx(TRACK_X[i]), py = my(TRACK_Y[i]);
+    i ? mctx.lineTo(px, py) : mctx.moveTo(px, py);
+  }
+  if (TRACK_X.length > 1) mctx.closePath();
+  mctx.strokeStyle = 'rgba(255,255,255,.13)'; mctx.lineWidth = 15; mctx.stroke();
+  mctx.strokeStyle = 'rgba(255,255,255,.30)'; mctx.lineWidth = 1.5; mctx.stroke();
+
+  // start / finish
+  const [sx, sy] = trackPoint(0);
+  mctx.fillStyle = '#fff';
+  mctx.fillRect(mx(sx) - 5, my(sy) - 5, 10, 10);
+  mctx.fillStyle = '#0B0D12';
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) {
+    if ((i + j) % 2) mctx.fillRect(mx(sx) - 5 + i * 2.5, my(sy) - 5 + j * 5, 2.5, 5);
+  }
+
+  // corner numbers
+  mctx.font = '8px Inter, sans-serif';
+  mctx.fillStyle = 'rgba(255,255,255,.28)';
+  mctx.textAlign = 'center';
+  for (const c of P.track.corners || []) {
+    if (c.x === null || c.x === undefined) continue;
+    mctx.fillText(String(c.number), mx(c.x), my(c.y));
+  }
+
+  // cars, leaders on top
+  const [i0] = frameAt(time);
+  const cars = rows.map((r, idx) => {
+    const base = r.d.slot * N;
+    return { d: r.d, f: r.frac, drs: r.d.hasTelemetry === false ? 0 : CH.drs[base + i0],
+             rank: idx + 1 };
+  });
+
+  for (const c of cars) {
+    const [px, py] = trackPoint(c.f);
+    const X = mx(px), Y = my(py);
+    const isSel = selected && c.d.number === selected.number;
+    const leader = c.rank === 1;
+    mctx.beginPath();
+    mctx.arc(X, Y, isSel ? 6.5 : leader ? 5 : 4, 0, Math.PI * 2);
+    mctx.fillStyle = c.d.colour;
+    mctx.fill();
+    mctx.lineWidth = isSel ? 2.5 : 1.4;
+    mctx.strokeStyle = isSel ? '#fff' : leader ? '#fff' : 'rgba(0,0,0,.65)';
+    mctx.stroke();
+    if (c.drs) {
+      mctx.beginPath(); mctx.arc(X, Y, isSel ? 9.5 : 8, 0, Math.PI * 2);
+      mctx.strokeStyle = 'rgba(62,207,142,.5)'; mctx.lineWidth = 1; mctx.stroke();
+    }
+    if (isSel || leader) {
+      mctx.font = (isSel ? '700 ' : '600 ') + '9px Inter, sans-serif';
+      mctx.fillStyle = '#fff'; mctx.textAlign = 'center';
+      mctx.strokeStyle = 'rgba(0,0,0,.85)'; mctx.lineWidth = 3;
+      const label = c.d.acronym || String(c.d.number);
+      mctx.strokeText(label, X, Y - 9);
+      mctx.fillText(label, X, Y - 9);
+    }
+  }
+}
+
+/* ---------------- driver panel ---------------- */
+function statCell(key, value, unit) {
+  const unitHtml = unit ? `<span class="stat-u">${esc(unit)}</span>` : '';
+  return `<div><div class="stat-k">${esc(key)}</div>` +
+         `<div class="stat-v">${esc(value)}${unitHtml}</div></div>`;
+}
+function renderDriver(time) {
+  if (!selected) return;
+  const d = selected;
+  const s = stateAt(d, time);
+  const [i0] = frameAt(time);
+  const base = d.slot * N;
+  const has = d.hasTelemetry !== false;
+  const speed = has ? CH.speed[base + i0] * 2 : null;
+  const drs = has ? CH.drs[base + i0] : 0;
+  const gear = has && CH.gear ? CH.gear[base + i0] : null;
+  const tyre = tyreAt(d, s.lap);
+
+  const drsHtml = drs
+    ? '<span class="flag-pill flag-GREEN" style="margin-left:auto">DRS</span>'
+    : '';
+  document.getElementById('drvHead').innerHTML = html`
+    <span class="drv-bar" style="background:${d.colour}"></span>
+    <div><div class="drv-name" style="color:${d.colour}">${d.acronym || d.number}</div>
+    <div class="drv-sub">${d.name} &middot; ${d.team}</div></div>
+    ${raw(drsHtml)}`;
+
+  const cells = [
+    statCell('Speed', speed === null ? 'no telemetry' : speed, speed === null ? '' : 'km/h'),
+    statCell('Position', s.pos || '—', ''),
+    statCell('Lap', s.lap, ''),
+    statCell('Gear', gear === null ? '—' : gear, ''),
+    statCell('Last', lapTime(s.lastTime), ''),
+    statCell('Best', lapTime(s.bestTime), ''),
+    statCell('Gap', gapStr(s.gap), ''),
+    statCell('Tyre', tyre ? `${tyre.compound[0]}${tyre.age}` : '—', ''),
+  ];
+  document.getElementById('drvStats').innerHTML = raw(cells.join(''));
+}
+
+/* ---------------- telemetry trace ---------------- */
+const traceCanvas = document.getElementById('traceCanvas');
+const tctx = traceCanvas.getContext('2d');
+const WINDOW_S = 45;
+function renderTrace(time) {
+  if (!selected) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = traceCanvas.clientWidth, h = traceCanvas.clientHeight;
+  // Both dimensions matter: a vertical resize alone used to leave the canvas
+  // at its old height, so the trace was drawn into a stale buffer.
+  if (traceCanvas.width !== Math.round(w * dpr) || traceCanvas.height !== Math.round(h * dpr)) {
+    traceCanvas.width = Math.round(w * dpr);
+    traceCanvas.height = Math.round(h * dpr);
+  }
+  tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  tctx.clearRect(0, 0, w, h);
+  if (!w || !h) return;
+
+  const from = time - WINDOW_S * 0.7, to = from + WINDOW_S;
+  const [i0] = frameAt(time);
+  const base = selected.slot * N;
+  const span = to - from;
+  const hint = document.getElementById('traceHint');
+
+  if (selected.hasTelemetry === false) {
+    tctx.fillStyle = 'rgba(255,255,255,.35)';
+    tctx.font = '11px Inter, sans-serif';
+    tctx.textAlign = 'center';
+    tctx.fillText('No telemetry for this driver in this session', w / 2, h / 2);
+    hint.textContent = 'no telemetry';
+    return;
+  }
+
+  // gridlines every 10s
+  tctx.strokeStyle = 'rgba(255,255,255,.05)'; tctx.lineWidth = 1;
+  tctx.beginPath();
+  for (let s = Math.ceil(from / 10) * 10; s < to; s += 10) {
+    const x = ((s - from) / span) * w;
+    tctx.moveTo(x, 0); tctx.lineTo(x, h);
+  }
+  tctx.stroke();
+
+  const trace = (channel, scale, stroke, fill) => {
+    tctx.beginPath();
+    for (let x = 0; x <= w; x += 2) {
+      const tt = from + (x / w) * span;
+      const i = Math.max(0, Math.min(N - 1, Math.round((tt - T0) * HZ)));
+      const v = CH[channel][base + i] / scale;
+      const y = h - 4 - v * (h - 14);
+      x ? tctx.lineTo(x, y) : tctx.moveTo(x, y);
+    }
+    if (fill) {
+      tctx.lineTo(w, h); tctx.lineTo(0, h); tctx.closePath();
+      tctx.fillStyle = fill; tctx.fill();
+    } else {
+      tctx.strokeStyle = stroke; tctx.lineWidth = 1.3; tctx.stroke();
+    }
+  };
+  trace('speed', 2, null, 'rgba(62,207,142,.20)');
+  trace('speed', 2, '#3ECF8E');
+  trace('throttle', 100, '#4C8DFF');
+  trace('brake', 100, '#ff4d4d');
+
+  // playhead
+  const px = ((time - from) / span) * w;
+  tctx.strokeStyle = 'rgba(255,255,255,.55)'; tctx.lineWidth = 1;
+  tctx.beginPath(); tctx.moveTo(px, 0); tctx.lineTo(px, h); tctx.stroke();
+  hint.textContent = `${CH.speed[base + i0] * 2} km/h`;
+}
+
+/* ---------------- speed trap + race control ---------------- */
+function renderStatic() {
+  document.getElementById('mapTitle').textContent = P.meta.circuit || 'Track';
+  document.getElementById('mapSub').textContent = `${(P.track.corners || []).length} corners`;
+  document.getElementById('tEnd').textContent = clock(DURATION);
+  document.getElementById('scrub').max = 1000;
+
+  // OpenF1's coverage is partial: say so rather than let a car without
+  // telemetry read as a car parked in the pits.
+  const cov = P.meta.coverage || {};
+  const note = document.getElementById('coverageNote');
+  if (cov.drivers && cov.withTelemetry !== undefined && cov.withTelemetry < cov.drivers) {
+    note.textContent = `OpenF1 coverage is partial: ${cov.withTelemetry} of ${cov.drivers} drivers have telemetry for this session.`;
+    note.className = 'panel-note warn';
+  } else {
+    note.textContent = 'Telemetry: OpenF1. Lap times and gaps are measured; on-track position is estimated.';
+    note.className = 'panel-note';
+  }
+
+  const top = P.meta.speedTrap.slice(0, 8);
+  const max = top.length ? top[0].speed : 1;
+  document.getElementById('trap').innerHTML = top.map((r, i) => {
+    const d = BY_NUM[r.driver] || {};
+    return html`<div class="trap-row">
+      <span class="c-pos">${i + 1}</span>
+      <span class="c-code" style="color:${d.colour || '#fff'}">${d.acronym || ''}</span>
+      <span class="trap-bar"><span class="trap-fill" style="width:${(r.speed / max * 100).toFixed(1)}%;background:${d.colour || '#888'}"></span></span>
+      <span class="trap-kmh">${r.speed}<span> km/h</span></span></div>`;
+  }).join('');
+}
+function renderRC(time) {
+  const shown = P.raceControl.filter(r => r.t <= time).slice(-40).reverse();
+  document.getElementById('rcCount').textContent = P.raceControl.filter(r => r.t <= time).length;
+  document.getElementById('rc').innerHTML = shown.map(r => {
+    const colour = r.flag === 'YELLOW' ? 'var(--warn)'
+      : r.flag === 'RED' ? '#ff5a52'
+      : r.flag && r.flag !== 'GREEN' ? '#ff7a2f'
+      : r.category === 'Penalty' ? '#ff7a2f' : 'var(--dim)';
+    return html`<div class="rc-row">
+      <span class="rc-tag" style="color:${colour}">${r.flag || (r.category || 'INFO').toUpperCase()}</span>
+      <span style="flex:1"><span class="rc-msg">${r.message || ''}</span>
+      <span class="rc-t" style="display:block">${clock(r.t - T0)}${r.lap ? ' · lap ' + r.lap : ''}</span></span></div>`;
+  }).join('') || '<div class="empty">No race-control messages yet.</div>';
+}
+
+/* ---------------- loop ---------------- */
+function render(now) {
+  const dt = lastFrame ? (now - lastFrame) / 1000 : 0;
+  lastFrame = now;
+  if (playing) {
+    t += dt * speed;
+    if (t >= T0 + DURATION) { t = T0 + DURATION; setPlaying(false); }
+    dirty = true;
+  }
+  currentT = t;
+  document.getElementById('tNow').textContent = clock(t - T0);
+  document.getElementById('scrub').value = Math.round(((t - T0) / (DURATION || 1)) * 1000);
+
+  // The map and the trace are canvas and need every frame while playing.
+  // Everything else is text whose finest value is a second, so it is rebuilt
+  // a few times a second rather than sixty. When nothing is moving the loop
+  // idles instead of redrawing the canvas at 60 fps for nothing.
+  if (dirty) {
+    const rows = orderAt(t);
+    const sec = Math.floor(t);
+    if (sec !== lastPanelSecond) {
+      lastPanelSecond = sec;
+      renderHeader(t, rows);
+      renderTower(t, rows);
+      renderDriver(t);
+      renderRC(t);
+    }
+    renderMap(t, rows);
+    renderTrace(t);
+    dirty = false;
+  }
+  requestAnimationFrame(render);
+}
+function setPlaying(on) {
+  playing = on;
+  dirty = true;
+  document.getElementById('playBtn').textContent = on ? 'PAUSE' : 'PLAY';
+}
+
+/* ---------------- controls ---------------- */
+document.getElementById('playBtn').onclick = () => setPlaying(!playing);
+document.getElementById('backBtn').onclick = () => seek(t - 10);
+document.getElementById('fwdBtn').onclick = () => seek(t + 10);
+document.getElementById('lapBtn').onclick = nextLap;
+document.getElementById('speedSel').onchange = e => speed = parseFloat(e.target.value);
+document.getElementById('scrub').oninput = e =>
+  seek(T0 + (e.target.value / 1000) * DURATION);
+function seek(v) { t = Math.max(T0, Math.min(T0 + DURATION, v)); lastPanelSecond = -1; dirty = true; }
+function nextLap() {
+  if (!selected) return;
+  const li = currentLapIndex(selected, t);
+  const next = selected.starts[li + 1];
+  if (next !== undefined) { seek(next); setPlaying(false); }
+}
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); setPlaying(!playing); }
+  else if (e.code === 'ArrowLeft') { e.preventDefault(); seek(t - 5); }
+  else if (e.code === 'ArrowRight') { e.preventDefault(); seek(t + 5); }
+  else if (e.code === 'KeyL') { nextLap(); }
+  else if (e.code === 'ArrowUp') { speed = Math.min(8, speed * 2); document.getElementById('speedSel').value = String(speed); }
+  else if (e.code === 'ArrowDown') { speed = Math.max(0.25, speed / 2); document.getElementById('speedSel').value = String(speed); }
+});
+window.addEventListener('resize', () => { fitMap(); dirty = true; });
+
+/* ---------------- boot ---------------- */
+function showMessage(markup) {
+  // The markup is built by this file (or escaped by esc() before it gets
+  // here); the tagged template keeps the rule that nothing reaches innerHTML
+  // unescaped by accident.
+  document.getElementById('root').innerHTML = html`<div class="empty">${raw(markup)}</div>`;
+}
+try {
+  readPayload();
+  if (!N || !P.drivers.length) {
+    showMessage('No telemetry was cached for this session.');
+  } else {
+    buildTrack();
+    buildDriverIndexes();
+    buildTowerRows();
+    selected = P.drivers[0];
+    t = T0;
+    renderStatic();
+    fitMap();
+    requestAnimationFrame(render);
+  }
+} catch (err) {
+  showMessage('The replay payload could not be read (' +
+              esc(err && err.message ? err.message : String(err)) + ').');
+}
+</script>
+</body>
+</html>

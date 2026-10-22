@@ -77,3 +77,66 @@ def test_build_report_extra_sections(report_df):
     md = build_report(2025, 'Australia', report_df, extra_sections=['## Tyre Strategy', '_MEDIUM 2x_'])
     assert '## Tyre Strategy' in md
     assert '_MEDIUM 2x_' in md
+
+
+def test_race_result_with_missing_lap_count():
+    """Regression: a missing lap count crashed the whole report page."""
+    rows = [
+        ('Australia', 1, 'NOR', 'McLaren', 1, 58, 25),
+        ('Australia', 2, 'VER', 'Red Bull', 3, None, 18),
+    ]
+    df = pd.DataFrame(
+        rows, columns=['Track', 'Position', 'Driver', 'Team', 'Starting Grid', 'Laps', 'Points']
+    )
+    df['SessionType'] = 'Race'
+
+    md = race_result_md(df, 'Australia')
+    assert 'NOR' in md
+    assert '—' in md          # the missing lap count is a dash, not a crash
+
+
+def test_race_result_keeps_not_classified_as_nc():
+    """'NC' is not the same result as 'DNF' and must not be relabelled."""
+    df = pd.DataFrame([
+        ('Australia', 'NC', 'HAM', 'Ferrari', 10, 20, 0),
+    ], columns=['Track', 'Position', 'Driver', 'Team', 'Starting Grid', 'Laps', 'Points'])
+    df['SessionType'] = 'Race'
+
+    md = race_result_md(df, 'Australia')
+    assert 'NC' in md
+    assert 'DNF' not in md
+
+
+def test_season_standings_include_sprint_points():
+    """The championship table counts the sprint of the same weekend."""
+    rows = [
+        ('Australia', 1, 'Race', 'NOR', 25),
+        ('Australia', 1, 'Sprint', 'NOR', 8),
+        ('Australia', 2, 'Race', 'VER', 18),
+    ]
+    df = pd.DataFrame(
+        rows, columns=['Track', 'Position', 'SessionType', 'Driver', 'Points']
+    )
+
+    md = season_standings_md(df)
+    assert '33' in md            # 25 + 8
+    assert 'sprint points' in md.lower()
+
+
+def test_build_report_with_sprint_rows_keeps_race_result_separate():
+    rows = [
+        ('Australia', 1, 'Race', 'NOR', 25),
+        ('Australia', 1, 'Sprint', 'VER', 8),
+        ('Australia', 2, 'Race', 'VER', 18),
+    ]
+    df = pd.DataFrame(
+        rows, columns=['Track', 'Position', 'SessionType', 'Driver', 'Points']
+    )
+    df['Laps'] = 58
+    df['Team'] = 'McLaren'
+
+    md = build_report(2025, 'Australia', df)
+    # The race result table lists the race rows only.
+    result = md.split('### Race Result')[1]
+    assert 'NOR' in result
+    assert result.count('\n') >= 3

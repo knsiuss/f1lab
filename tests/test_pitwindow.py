@@ -5,10 +5,13 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.config import MODEL_CONFIG
 from src.pitwindow import ESTIMATED, pit_window
+from src.whatif import Scenario, simulate_scenario
 
 
 def _laps(base=90.0, n=30, driver="VER", deg=0.0, stint=1):
@@ -78,3 +81,62 @@ def test_pit_window_no_meaningful_deg_blank_window():
         row = out.iloc[0]
         assert pd.isna(row["OptimalLap"])
         assert pd.isna(row["WindowStart"]) and pd.isna(row["WindowEnd"])
+
+
+# ---------------------------------------------------------------------------
+# Multi-stop strategies: the answer must be a real n-stop strategy
+# ---------------------------------------------------------------------------
+
+def test_pit_window_two_stops_is_not_the_one_stop_answer():
+    """n_stops=2 must not collapse into the one-stop optimum."""
+    one = pit_window(_laps(deg=0.1), total_laps=50, n_stops=1).iloc[0]
+    two = pit_window(_laps(deg=0.1), total_laps=50, n_stops=2).iloc[0]
+    assert two["NStops"] == 2
+    # The two-stop answer reports two distinct stop laps.
+    assert two["OptimalLap2"] is not None
+    assert not pd.isna(two["OptimalLap2"])
+    assert two["OptimalLap"] < two["OptimalLap2"]
+    # And it is a different plan from the one-stop answer.
+    assert (two["OptimalLap"], two["OptimalLap2"]) != (one["OptimalLap"], None)
+
+
+def test_pit_window_two_stop_plan_is_charged_two_pit_losses():
+    """The reported two-stop plan really costs two pit stops."""
+    row = pit_window(_laps(deg=0.1), total_laps=50, n_stops=2).iloc[0]
+    stops = [int(s) for s in str(row["OptimalStops"]).split("-")]
+    assert len(stops) == 2
+    scenario = Scenario(name="plan", compounds=["DEFAULT"] * 3, stop_laps=stops)
+    kwargs = dict(total_laps=50, base_lap_time=float(row["BasePace"]),
+                  deg_rates={"DEFAULT": float(row["DegPerLap"])},
+                  fuel_gain=float(MODEL_CONFIG["fuel_gain_per_lap"]))
+    with_pit = simulate_scenario(scenario, pit_loss=22.0, **kwargs)
+    without_pit = simulate_scenario(scenario, pit_loss=0.0, **kwargs)
+    assert with_pit["n_stops"] == 2
+    assert with_pit["total_time"] - without_pit["total_time"] == pytest.approx(
+        44.0, abs=0.01)
+
+
+def test_pit_window_one_stop_still_charges_one_pit_loss():
+    """The single-stop plan is charged exactly one pit loss."""
+    row = pit_window(_laps(deg=0.1), total_laps=50, n_stops=1).iloc[0]
+    stops = [int(s) for s in str(row["OptimalStops"]).split("-")]
+    scenario = Scenario(name="plan", compounds=["DEFAULT"] * 2, stop_laps=stops)
+    kwargs = dict(total_laps=50, base_lap_time=float(row["BasePace"]),
+                  deg_rates={"DEFAULT": float(row["DegPerLap"])},
+                  fuel_gain=float(MODEL_CONFIG["fuel_gain_per_lap"]))
+    with_pit = simulate_scenario(scenario, pit_loss=22.0, **kwargs)
+    without_pit = simulate_scenario(scenario, pit_loss=0.0, **kwargs)
+    assert with_pit["n_stops"] == 1
+    assert with_pit["total_time"] - without_pit["total_time"] == pytest.approx(
+        22.0, abs=0.01)
+
+
+def test_pit_window_reports_multi_stop_columns():
+    """The extra columns the caller needs to show a two-stop window."""
+    out = pit_window(_laps(deg=0.1), total_laps=50, n_stops=2)
+    for col in ("NStops", "OptimalLap2", "WindowStart2", "WindowEnd2",
+                "OptimalStops", "Candidates"):
+        assert col in out.columns
+    row = out.iloc[0]
+    assert row["WindowStart2"] <= row["OptimalLap2"] <= row["WindowEnd2"]
+    assert row["Candidates"] > 1

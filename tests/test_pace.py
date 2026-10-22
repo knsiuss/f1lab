@@ -66,10 +66,33 @@ def test_normalised_pace_by_stint_structure():
     out = normalised_pace_by_stint(_laps())
     assert len(out) == 1
     row = out.iloc[0]
-    assert row["BasePace"] == pytest.approx(90.0, abs=0.01)
+    # FastF1's TyreLife starts at 1, so the fresh-tyre pace is the fitted line
+    # at age 1 (90.0 + 0.08), not the age-0 intercept (90.0).
+    assert row["BasePace"] == pytest.approx(90.08, abs=0.01)
     assert row["DegPerLap"] == pytest.approx(0.08, abs=0.001)
     assert row["Level"] == "good"
     assert row["Estimated"] == ESTIMATED
+
+
+def test_base_pace_is_evaluated_at_tyre_age_one():
+    """Regression: the published fresh-tyre pace must not be the age-0 intercept.
+
+    Reporting the intercept makes every driver look one lap of degradation
+    faster than they are, and the number feeds the pit-window simulator.
+    """
+    out = normalised_pace_by_stint(_laps(base=90.0, deg=0.08))
+    row = out.iloc[0]
+    assert row["BasePace"] == pytest.approx(90.08, abs=0.01)
+    # The age-0 intercept is still reported, but labelled as such.
+    assert row["Age0Intercept"] == pytest.approx(90.0, abs=0.01)
+    assert row["BasePace"] > row["Age0Intercept"]
+
+
+def test_long_run_base_pace_uses_age_one():
+    out = long_run_quality(_laps(n=20, base=90.0, deg=0.08), min_stint=10)
+    assert len(out) == 1
+    assert out.iloc[0]["BasePace"] == pytest.approx(90.08, abs=0.01)
+    assert out.iloc[0]["Age0Intercept"] == pytest.approx(90.0, abs=0.01)
 
 
 def test_normalised_pace_two_stints():

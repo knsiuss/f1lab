@@ -86,3 +86,26 @@ def test_sector_deficits_insufficient_sample_none():
     out = sector_deficits(_laps(n=1))
     # One clean lap is below the fit threshold but sector stats still show.
     assert not out.empty
+    assert out.iloc[0]['Level'] == 'insufficient'
+    assert out.iloc[0]['Confidence'] == 'low'
+
+
+def test_sector_deficits_respects_the_driver_argument():
+    """Regression: the driver filter was ignored and the whole field came back."""
+    df = pd.concat([
+        _laps(driver='VER', s1=28.0, s2=31.0, s3=32.0),
+        _laps(driver='LEC', s1=28.5, s2=30.0, s3=32.0),
+    ])
+
+    out = sector_deficits(df, driver='VER')
+
+    assert list(out['Driver']) == ['VER']
+    # The reference is still the session best (LEC is quicker in S2).
+    assert out.iloc[0]['Sector1Def'] == 0.0
+    assert out.iloc[0]['Sector2Def'] == 1.0
+
+
+def test_sector_summary_respects_the_driver_argument():
+    df = pd.concat([_laps(driver='VER'), _laps(driver='LEC')])
+    out = sector_summary(df, driver='LEC')
+    assert list(out['Driver']) == ['LEC']

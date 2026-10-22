@@ -43,6 +43,12 @@ def get_tyre_stints(session: Any, driver: Optional[str] = None) -> pd.DataFrame:
     """
     Get tyre stint data for all or specific driver.
 
+    FastF1's own ``Stint`` column is used when the lap table carries it: a
+    pit stop on the same compound is a new stint even though the compound
+    never changed, and re-deriving the stints from compound changes alone
+    missed those stops completely (one continuous bar on the strategy map,
+    and no stop in the pit-stop fallback).
+
     Args:
         session: FastF1 Session object
         driver: Optional driver code (e.g., 'VER', 'NOR')
@@ -61,6 +67,9 @@ def get_tyre_stints(session: Any, driver: Optional[str] = None) -> pd.DataFrame:
 
         if len(laps) == 0:
             return pd.DataFrame()
+
+        if 'Stint' in laps.columns and 'LapNumber' in laps.columns:
+            return _stints_from_stint_column(laps)
 
         # Group by driver and stint
         stints = []
@@ -106,6 +115,93 @@ def get_tyre_stints(session: Any, driver: Optional[str] = None) -> pd.DataFrame:
     except Exception as e:
         logger.error(f"Error getting tyre stints: {e}")
         return pd.DataFrame()
+
+
+def _stints_from_stint_column(laps: pd.DataFrame) -> pd.DataFrame:
+    """Stints taken from FastF1's own ``Stint`` column.
+
+    FastF1 counts the stints of a session itself, so a stop on the same
+    compound (a "safety" stop, or a double stint on the same tyre) is a new
+    stint there. Re-deriving the stints from compound changes alone missed
+    those stops: the strategy map drew one continuous bar and the pit-stop
+    fallback reported no stop at all.
+    """
+    rows = []
+    for (driver, stint), group in laps.groupby(['Driver', 'Stint'], dropna=False):
+        group = group.sort_values('LapNumber')
+        start = int(pd.to_numeric(group['LapNumber'], errors='coerce').min())
+        end = int(pd.to_numeric(group['LapNumber'], errors='coerce').max())
+        compound = 'UNKNOWN'
+        if 'Compound' in group.columns:
+            values = group['Compound'].dropna()
+            if not values.empty:
+                compound = str(values.iloc[0])
+        rows.append({
+            'Driver': driver,
+            'Stint': int(stint) if pd.notna(stint) else 0,
+            'Compound': compound,
+            'StartLap': start,
+            'EndLap': end,
+            'Laps': end - start + 1,
+        })
+    return pd.DataFrame(rows)
+
+
+def pit_laps_by_driver(pit_stops: pd.DataFrame) -> dict:
+    """Pit-entry lap numbers per driver, from a pit-stop frame.
+
+    The pit-stop frame names its lap column ``Lap`` (not ``LapNumber``).
+    Reading the wrong name put every stop on lap 0, which is why the pit
+    markers never appeared on the lap-time chart.
+    """
+    if pit_stops is None or pit_stops.empty:
+        return {}
+    if 'Driver' not in pit_stops.columns:
+        return {}
+    lap_column = 'Lap' if 'Lap' in pit_stops.columns else (
+        'LapNumber' if 'LapNumber' in pit_stops.columns else None)
+    if lap_column is None:
+        return {}
+    laps = {}
+    for driver, group in pit_stops.groupby('Driver'):
+        numbers = pd.to_numeric(group[lap_column], errors='coerce').dropna()
+        laps[driver] = sorted(int(n) for n in numbers)
+    return laps
+
+
+def ordered_drivers(session: Any, frame: pd.DataFrame,
+                    column: str = 'Driver') -> list:
+    """The drivers in ``frame`` in finishing order, spelled as the frame spells them.
+
+    FastF1 names a driver by the three-letter code ('VER'); the OpenF1 rebuild
+    names them in full ('Max Verstappen').  Matching a tyre table against
+    ``session.results['Abbreviation']`` therefore found nobody when the session
+    came from OpenF1, and the tyre chart reported "0 drivers".  This matches on
+    either label and keeps the frame's own spelling, so both sources work.
+    """
+    if frame is None or getattr(frame, 'empty', True) or column not in frame.columns:
+        return []
+    present = [str(name) for name in dict.fromkeys(frame[column].astype(str))]
+
+    rank: dict = {}
+    try:
+        results = getattr(session, 'results', None) if session is not None else None
+    except Exception:
+        results = None
+    if (isinstance(results, pd.DataFrame) and not results.empty
+            and 'Position' in results.columns):
+        for _, row in results.sort_values('Position').iterrows():
+            try:
+                position = int(row['Position'])
+            except (TypeError, ValueError):
+                continue
+            for key in ('Abbreviation', 'Driver', 'BroadcastName', 'FullName'):
+                label = row.get(key)
+                if isinstance(label, str) and label in present:
+                    rank.setdefault(label, position)
+
+    return sorted(present, key=lambda name: (rank.get(name, 10_000), present.index(name)))
+
 
 # PIT STOPS
 
@@ -256,9 +352,14 @@ def get_race_control_messages(session: Any) -> pd.DataFrame:
 
         df = rcm[valid_cols].copy()
 
-        # Format time
+        # Format time. FastF1's race-control timestamps are absolute
+        # timestamps, so they are rendered as an elapsed race time measured
+        # from the session start (or as the wall-clock time when the session
+        # start is unknown) -- never as an empty string.
         if 'Time' in df.columns:
-            df['Time'] = df['Time'].apply(lambda x: format_f1_time(x) if pd.notna(x) else "")
+            origin = _session_origin(session)
+            df['Time'] = df['Time'].apply(
+                lambda x: _elapsed_race_time(x, origin) if pd.notna(x) else "")
 
         return df
 
@@ -267,8 +368,48 @@ def get_race_control_messages(session: Any) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _session_origin(session: Any) -> Optional[pd.Timestamp]:
+    """The session start time, when the session knows it."""
+    try:
+        origin = getattr(session, 'session_start_time', None)
+    except Exception:
+        return None
+    return origin if isinstance(origin, pd.Timestamp) else None
+
+
+def _elapsed_race_time(value: Any, origin: Optional[pd.Timestamp] = None) -> str:
+    """A race-control timestamp as an elapsed race time.
+
+    A timestamp relative to the session start reads as the race clock
+    ("12:34.567"); without a known session start it falls back to the
+    wall-clock time of the event ("14:05:33").
+    """
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, pd.Timestamp):
+        if origin is not None:
+            try:
+                return format_f1_time(value - origin)
+            except Exception:
+                pass
+        return format_f1_time(value)
+    return format_f1_time(value)
+
+
 def format_f1_time(td) -> str:
-    """Format a Timedelta/seconds value as H:MM:SS or M:SS."""
+    """Format a Timedelta/seconds/Timestamp value as H:MM:SS or M:SS.
+
+    A ``pd.Timestamp`` is formatted as a wall-clock time -- the race-control
+    messages carry timestamps, and they used to come out as empty strings
+    because a Timestamp has no ``total_seconds``.
+    """
+    if isinstance(td, pd.Timestamp):
+        return f"{td.hour:02d}:{td.minute:02d}:{td.second:02d}"
     try:
         total_seconds = float(td.total_seconds()) if hasattr(td, 'total_seconds') else float(td)
     except (TypeError, ValueError, AttributeError):

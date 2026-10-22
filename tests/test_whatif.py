@@ -16,6 +16,7 @@ from src.whatif import (
     scenario_risk,
     simulate_scenario,
     stint_time,
+    stop_lap_problem,
     undercut_delta,
 )
 
@@ -135,3 +136,107 @@ def test_undercut_delta_with_rival_response():
         base["delta_sec"] + 10.0, abs=0.01)
     assert any("rival response to the earlier stop" in a
                for a in reacted["assumptions"])
+
+
+# ---------------------------------------------------------------------------
+# Stop-plan rules: every declared stop is paid for, invalid plans are refused
+# ---------------------------------------------------------------------------
+
+def test_stop_lap_zero_is_rejected_not_simulated_as_a_free_stop():
+    """A stop on lap 0 is not a strategy -- it must not score a free time."""
+    sc = Scenario(name="lap0", compounds=["SOFT", "HARD"], stop_laps=[0])
+    res = simulate_scenario(sc, total_laps=30)
+    assert res.get("level") == "insufficient"
+    assert "total_time" not in res
+    assert res.get("reason")
+
+
+def test_rejected_lap_zero_stop_would_otherwise_look_fastest():
+    """Regression: the old code turned stop_lap=0 into a 0-stop race."""
+    real = simulate_scenario(
+        Scenario(name="real", compounds=["SOFT", "HARD"], stop_laps=[15]),
+        total_laps=30)
+    bogus = simulate_scenario(
+        Scenario(name="bogus", compounds=["SOFT", "HARD"], stop_laps=[0]),
+        total_laps=30)
+    # The bogus plan must not be scored at all (it used to be the fastest).
+    assert "total_time" not in bogus
+    assert real["total_time"] > 0
+
+
+def test_stop_lap_beyond_race_distance_is_rejected():
+    """A stop after the flag is not a strategy."""
+    sc = Scenario(name="late", compounds=["SOFT", "HARD"], stop_laps=[30])
+    res = simulate_scenario(sc, total_laps=30)
+    assert res.get("level") == "insufficient"
+    assert "total_time" not in res
+
+
+def test_stop_lap_on_final_lap_is_the_boundary_and_is_allowed():
+    """A stop on the last lap is allowed: the new tyre still runs one lap."""
+    sc = Scenario(name="last", compounds=["SOFT", "HARD"], stop_laps=[29])
+    res = simulate_scenario(sc, total_laps=30)
+    assert res.get("total_time") is not None
+    assert res["n_stops"] == 1
+    # One lap beyond the flag is not a strategy.
+    beyond = simulate_scenario(
+        Scenario(name="beyond", compounds=["SOFT", "HARD"], stop_laps=[30]),
+        total_laps=30)
+    assert beyond.get("level") == "insufficient"
+
+
+def test_more_stops_than_compounds_is_rejected_not_dropped():
+    """Two stops with two compounds must not silently become one stop."""
+    sc = Scenario(name="two", compounds=["SOFT", "HARD"], stop_laps=[10, 20])
+    res = simulate_scenario(sc, total_laps=30)
+    assert res.get("level") == "insufficient"
+    assert "total_time" not in res
+    assert res.get("n_stops") == 2
+
+
+def test_stop_laps_must_increase():
+    """A plan whose stops go backwards is refused."""
+    sc = Scenario(name="backwards", compounds=["SOFT", "MEDIUM", "HARD"],
+                  stop_laps=[20, 10])
+    res = simulate_scenario(sc, total_laps=30)
+    assert res.get("level") == "insufficient"
+    assert "total_time" not in res
+
+
+def test_n_stops_comes_from_the_scenario():
+    """The reported stop count is the number of stops that were declared."""
+    res = simulate_scenario(
+        Scenario(name="two", compounds=["SOFT", "MEDIUM", "HARD"],
+                 stop_laps=[10, 20]),
+        total_laps=30)
+    assert res["n_stops"] == 2
+    assert res["stops_laps"] == [10, 20]
+
+
+def test_every_declared_stop_is_charged_its_pit_loss():
+    """Two stops must cost two pit losses, not one."""
+    sc = Scenario(name="two", compounds=["SOFT", "MEDIUM", "HARD"],
+                  stop_laps=[10, 20])
+    with_pit = simulate_scenario(sc, total_laps=30, pit_loss=22.0)
+    without_pit = simulate_scenario(sc, total_laps=30, pit_loss=0.0)
+    assert with_pit["total_time"] - without_pit["total_time"] == pytest.approx(
+        44.0, abs=0.01)
+
+
+def test_stop_lap_problem_helper():
+    """The shared rule reports why a plan cannot be simulated."""
+    assert stop_lap_problem([10], ["SOFT", "HARD"], 30) is None
+    assert stop_lap_problem([], ["SOFT"], 30) is None
+    assert stop_lap_problem([0], ["SOFT", "HARD"], 30) is not None
+    assert stop_lap_problem([30], ["SOFT", "HARD"], 30) is not None
+    assert stop_lap_problem([10, 20], ["SOFT", "HARD"], 30) is not None
+    assert stop_lap_problem([20, 10], ["SOFT", "MEDIUM", "HARD"], 30) is not None
+
+
+def test_undercut_delta_rejects_a_race_too_short_for_a_stop():
+    """A race with no room for a stop reports insufficient, not a number."""
+    d = undercut_delta(total_laps=2, compound_new="HARD", compound_old="SOFT",
+                       earlier_by=1)
+    assert d["delta_sec"] is None
+    assert d["level"] == "insufficient"
+    assert d.get("reason")

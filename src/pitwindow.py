@@ -11,6 +11,15 @@ the exact same strategy engine used everywhere else (whatif.simulate_scenario).
 The result is an optimal stop lap plus a "radar" window of laps within a small
 time tolerance of that optimum.
 
+Multi-stop strategies
+---------------------
+``n_stops`` is the number of *real* pit stops: the search enumerates stop
+plans with distinct, increasing stop laps (``stop_1 < stop_2 < ...``) and
+every plan is simulated with the stop count the plan declares, so a two-stop
+strategy is charged two pit losses and can never collapse into the one-stop
+answer. The stop-plan rules live in :func:`whatif.stop_lap_problem` and both
+modules use them.
+
 Data Honesty contract: everything is estimated from the driver's own clean laps
 where available, labelled estimated, and carries a confidence label from the
 sample size. Drivers with no degradation fit fall back to model defaults at low
@@ -20,9 +29,10 @@ confidence rather than being silently assumed perfect or assumed bad.
 :license: MIT
 """
 
+import itertools
 import sys
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -42,6 +52,12 @@ DEFAULT_COMPOUND = "DEFAULT"
 # "optimal" and an early stop would be an artefact of noise. We report no window
 # (the row still appears, flagged) instead of inventing an early stop lap.
 MIN_MEANINGFUL_DEG = 0.02
+
+# Upper bound on the number of stop plans evaluated per driver. A two-stop
+# search over a 57-lap race is C(56, 2) = 1540 plans; a three-stop search
+# would be 29k, so the candidate laps are thinned with a stride and the
+# stride is reported in the output (a coarser search, said out loud).
+MAX_CANDIDATES = 2000
 
 
 def _resolve_total_laps(laps: pd.DataFrame,
@@ -80,6 +96,33 @@ def _driver_estimates(laps: pd.DataFrame) -> Tuple[Dict[str, float],
     return base_map, deg_map, counts
 
 
+def _stop_plans(total_laps: int, n_stops: int) -> Tuple[List[Tuple[int, ...]], int]:
+    """Candidate stop plans: ``n_stops`` distinct, increasing laps in the race.
+
+    A stop must leave at least one lap on the old tyre and one on the new
+    tyre, so the candidate laps are ``1 .. total_laps - 1`` (the same rule
+    :func:`whatif.stop_lap_problem` enforces). Returns the plans and the
+    stride used to thin them when the search space would be too large.
+    """
+    laps = list(range(1, max(2, total_laps)))
+    if n_stops <= 1:
+        return [(lap,) for lap in laps], 1
+    if n_stops > len(laps):
+        return [], 1
+    total = 1
+    for i in range(n_stops):
+        total = total * (len(laps) - i) // (i + 1)
+    stride = 1
+    while total // stride > MAX_CANDIDATES:
+        stride += 1
+    if stride > 1:
+        thinned = laps[::stride]
+        if thinned[-1] != laps[-1]:
+            thinned.append(laps[-1])
+        laps = thinned
+    return [tuple(plan) for plan in itertools.combinations(laps, n_stops)], stride
+
+
 def pit_window(laps: pd.DataFrame,
                total_laps: Optional[int] = None,
                n_stops: int = 1,
@@ -95,6 +138,13 @@ def pit_window(laps: pd.DataFrame,
     lap plus the range of stop laps that fall within ``tolerance`` seconds of
     the optimum.
 
+    For ``n_stops >= 2`` the search enumerates plans with distinct, increasing
+    stop laps, so the answer is a real two-stop (or n-stop) strategy and is
+    charged that many pit losses. ``OptimalLap`` then reports the *first*
+    stop lap of the optimal plan, ``OptimalLap2`` its last stop lap, and
+    ``WindowStart``/``WindowEnd`` the range of first stop laps inside the
+    tolerance (``WindowStart2``/``WindowEnd2`` the same for the last stop).
+
     Args:
         laps: FastF1-style lap table (Driver, LapNumber, LapTime, ...).
         total_laps: simulated race length; defaults to the table's max lap.
@@ -105,7 +155,9 @@ def pit_window(laps: pd.DataFrame,
 
     Returns:
         DataFrame (possibly empty) with Driver, OptimalLap, WindowStart,
-        WindowEnd, BasePace, DegPerLap, Level, Confidence, Estimated.
+        WindowEnd, BasePace, DegPerLap, Level, Confidence, Estimated and the
+        extra multi-stop columns (NStops, OptimalLap2, WindowStart2,
+        WindowEnd2, OptimalStops, Candidates, SearchStride).
     """
     deg_rates = deg_rates or MODEL_CONFIG["degradation_rates"]
     pit_loss = pit_loss if pit_loss is not None else MODEL_CONFIG["pit_loss_sec"]
@@ -115,6 +167,7 @@ def pit_window(laps: pd.DataFrame,
     if laps is None or laps.empty or "Driver" not in laps.columns:
         return pd.DataFrame()
 
+    n_stops = max(1, int(n_stops))
     N = _resolve_total_laps(laps, total_laps)
     if N <= n_stops + 1:
         return pd.DataFrame()
@@ -123,7 +176,9 @@ def pit_window(laps: pd.DataFrame,
     if not base_map:
         return pd.DataFrame()
 
-    search_laps = range(1, N - n_stops + 1)
+    plans, stride = _stop_plans(N, n_stops)
+    if not plans:
+        return pd.DataFrame()
     compounds = [DEFAULT_COMPOUND] * (n_stops + 1)
     default_deg = deg_rates["DEFAULT"]
 
@@ -135,11 +190,11 @@ def pit_window(laps: pd.DataFrame,
         quality = data_quality(counts.get(drv, 0))
 
         totals = []
-        for stop_lap in search_laps:
+        for stops in plans:
             scenario = Scenario(
-                name=f"radar@{stop_lap}",
+                name="radar@" + "-".join(str(s) for s in stops),
                 compounds=compounds,
-                stop_laps=[stop_lap] * n_stops,
+                stop_laps=list(stops),
             )
             res = simulate_scenario(
                 scenario, N,
@@ -148,7 +203,7 @@ def pit_window(laps: pd.DataFrame,
             )
             tot = (res or {}).get("total_time")
             if tot is not None:
-                totals.append((stop_lap, float(tot)))
+                totals.append((stops, float(tot)))
 
         if not totals:
             continue
@@ -158,11 +213,21 @@ def pit_window(laps: pd.DataFrame,
         # artefact early stop from a flat total-time curve.
         meaningful = deg is not None and deg >= MIN_MEANINGFUL_DEG
         if meaningful:
-            optimal_lap, opt_total = min(totals, key=lambda t: t[1])
-            window = sorted(lap for lap, tot in totals if tot <= opt_total + tolerance)
-            opt, ws, we = optimal_lap, window[0], window[-1]
+            optimal_stops, opt_total = min(totals, key=lambda t: t[1])
+            inside = [stops for stops, tot in totals
+                      if tot <= opt_total + tolerance]
+            firsts = sorted(s[0] for s in inside)
+            lasts = sorted(s[-1] for s in inside)
+            # The optimum is the argmin plan; the window is the spread of the
+            # plans that stay within the tolerance of it.
+            opt = optimal_stops[0]
+            ws, we = firsts[0], firsts[-1]
+            opt_last = optimal_stops[-1]
+            ws2 = we2 = None
+            if n_stops >= 2:
+                ws2, we2 = lasts[0], lasts[-1]
         else:
-            opt, ws, we = None, None, None
+            opt = ws = we = opt_last = ws2 = we2 = None
 
         rows.append({
             "Driver": drv,
@@ -174,6 +239,14 @@ def pit_window(laps: pd.DataFrame,
             "Level": quality["level"],
             "Confidence": quality["confidence"],
             "Estimated": ESTIMATED,
+            "NStops": n_stops,
+            "OptimalLap2": opt_last if n_stops >= 2 else None,
+            "WindowStart2": ws2,
+            "WindowEnd2": we2,
+            "OptimalStops": ("-".join(str(s) for s in optimal_stops)
+                             if meaningful else None),
+            "Candidates": len(totals),
+            "SearchStride": stride,
         })
 
     out = pd.DataFrame(rows)

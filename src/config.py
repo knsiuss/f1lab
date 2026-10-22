@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 config.py
 Application constants and configuration.
@@ -18,8 +18,6 @@ from dataclasses import dataclass
 # (as `config` from a page, or as `src.config` from the test suite).
 sys.path.insert(0, str(Path(__file__).parent))
 
-from seasons import discover_available_years  # noqa: E402
-
 
 def _current_calendar_year() -> int:
     """The year we are in right now; used to stream the in-progress season."""
@@ -31,15 +29,16 @@ def _current_calendar_year() -> int:
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
 
-# Data directories
-DATA_DIR = PROJECT_ROOT / 'data'
+# Cache directories. There is no data directory any more: the season results
+# come from the OpenF1 API, not from local CSV exports.
 CACHE_DIR = PROJECT_ROOT / 'cache'
 LOGS_DIR = PROJECT_ROOT / 'logs'
+DATA_DIR = PROJECT_ROOT / 'data'  # legacy path, kept for compatibility
 
 
 def _ensure_dirs():
-    """Create data/cache/logs directories if they don't exist."""
-    for directory in [DATA_DIR, CACHE_DIR, LOGS_DIR]:
+    """Create the cache/log directories if they don't exist."""
+    for directory in [CACHE_DIR, LOGS_DIR]:
         directory.mkdir(exist_ok=True)
 
 # DATA FILE PATHS
@@ -61,37 +60,49 @@ class FastF1Config:
     def get_supported_years(self) -> list:
         """Get list of supported historical seasons (includes the live season).
 
-        Streaming is deliberately inclusive of the in-progress (current calendar)
-        year so FastF1-backed pages can pull sessions online even before that
-        season's result CSVs exist; CSV-backed pages degrade gracefully.
+        Streaming is deliberately inclusive of the in-progress (current
+        calendar) year so FastF1-backed pages can pull sessions online even
+        before that season's results exist; results-backed pages degrade
+        gracefully with an honest "no data" state.
         """
         upper = max(self.max_supported_year, _current_calendar_year())
         return list(range(self.min_supported_year, upper + 1))
 
 FASTF1_CONFIG = FastF1Config()
 
+@dataclass
+class OpenF1Config:
+    """OpenF1 API configuration (championship results + session telemetry)."""
+    base_url: str = 'https://api.openf1.org/v1'
+    # OpenF1's historical archive starts with the 2023 season.
+    first_covered_season: int = 2023
+    # Responses are cached on disk so a season costs one slow fetch, not one
+    # slow fetch per page reload.
+    cache_ttl_s: int = 6 * 3600
+    # Published free-tier limits (3 requests/second, 30 requests/minute).
+    rate_limit_per_second: int = 3
+    rate_limit_per_minute: int = 30
+    request_timeout_s: int = 30
+    request_attempts: int = 4
 
-def _apply_season_discovery() -> None:
-    """Derive season defaults from the CSVs actually present in data/.
+OPENF1_CONFIG = OpenF1Config()
 
-    Seasons are discovered rather than hardcoded: dropping a
-    Formula1_{year}Season_RaceResults.csv file into data/ is all it takes to
-    opt the app into that year. We fall back to a seed of 2025 when the data
-    directory is empty (e.g. a fresh checkout before CSVs are placed).
+
+def _apply_season_defaults() -> None:
+    """Set the season defaults now that the data comes from the API.
+
+    The app no longer discovers seasons from a ``data/`` folder. It opens on
+    the **current** season, because that is the one the reader cares about,
+    and the supported range always includes the current calendar year, so an
+    in-progress season is streamed live.
     """
-    years = discover_available_years(DATA_DIR)
-    if years:
-        FASTF1_CONFIG.default_year = years[-1]
-        # The API still supports later seasons once their data is present.
-        FASTF1_CONFIG.max_supported_year = max(
-            FASTF1_CONFIG.max_supported_year, years[-1]
-        )
-    else:
-        FASTF1_CONFIG.default_year = 2025
-        FASTF1_CONFIG.max_supported_year = 2025
+    FASTF1_CONFIG.default_year = _current_calendar_year()
+    FASTF1_CONFIG.max_supported_year = max(
+        FASTF1_CONFIG.max_supported_year, _current_calendar_year()
+    )
 
 
-_apply_season_discovery()
+_apply_season_defaults()
 
 # F1 Points System
 TEAM_COLORS: Dict[str, str] = {
@@ -131,6 +142,8 @@ TEAM_COLORS: Dict[str, str] = {
     'Kick Sauber Ferrari': '#00E701',  # 2025 Neon Green
     'MoneyGram Haas F1 Team': '#E6002B',
     'Haas Ferrari': '#E6002B',
+    # Names as OpenF1 reports them (the season results come from the API)
+    'Haas F1 Team': '#E6002B',
 }
 
 # DRIVER PROFILES (2025 F1 Season)
@@ -491,12 +504,17 @@ logger = setup_logging()
 @dataclass
 class StreamlitConfig:
     """Streamlit dashboard configuration."""
-    page_title: str = "F1 2025 Season Dashboard"
+    page_title: str = "F1 Lab - public F1 data analytics"
     page_icon: str = "F1"
     layout: str = "wide"
-    theme_primary_color: str = "#FF1E00"
-    theme_background_color: str = "#0E1117"
+    theme_primary_color: str = "#E10600"
+    theme_background_color: str = "#0B0D12"
+    # How long a data frame is kept in memory. An hour is enough for the
+    # season frame, which is the one thing that changes while a season runs.
     cache_ttl: int = 3600  # 1 hour
+    # A finished session never changes, so the FastF1 session loader keeps it
+    # for a day: re-reading it every hour costs seconds for nothing.
+    session_cache_ttl: int = 24 * 3600  # 24 hours
 
 STREAMLIT_CONFIG = StreamlitConfig()
 
@@ -581,8 +599,8 @@ if __name__ == '__main__':
     print("F1 Visualization Configuration")
     print("=" * 50)
     print(f"Project Root: {PROJECT_ROOT}")
-    print(f"Data Directory: {DATA_DIR}")
     print(f"Cache Directory: {CACHE_DIR}")
-    print(f"Discovered seasons: {discover_available_years(DATA_DIR)}")
+    print(f"Data source: OpenF1 API ({OPENF1_CONFIG.base_url})")
     print(f"Supported season range: {FASTF1_CONFIG.get_supported_years()}")
+    print(f"Results available from season: {OPENF1_CONFIG.first_covered_season}")
     print("\nConfig loaded successfully!")

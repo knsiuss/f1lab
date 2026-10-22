@@ -119,6 +119,13 @@ def sector_deficits(laps: pd.DataFrame,
     the column names the fastest driver and the deficit of every other driver
     relative to it. Best sector times are taken from clean laps only.
 
+    Args:
+        laps: lap table.
+        driver: restrict the result to one driver. The session-best reference
+            is still computed over the whole field -- a driver's deficit is
+            measured against the best time anyone set -- but only the rows of
+            that driver are returned.
+
     Returns:
         DataFrame (possibly empty) with Driver, S1Def/S2Def/S3Def (None when
         the sector is missing or the driver has no clean sector), Quality,
@@ -138,8 +145,12 @@ def sector_deficits(laps: pd.DataFrame,
     if not best:
         return pd.DataFrame()
 
+    # The reference is the session best over the whole field; the returned
+    # rows are the ones the caller asked for.
     rows = []
     for d, grp in clean.groupby('Driver', dropna=False):
+        if driver is not None and d != driver:
+            continue
         n = len(grp)
         quality = data_quality(n)
         row = {"Driver": d, "N": n,

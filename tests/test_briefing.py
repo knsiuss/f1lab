@@ -104,6 +104,21 @@ def test_debrief_forecast_podium_match():
     forecast = pd.DataFrame({'Driver': ['A1', 'B1', 'A2', 'B2', 'C1']})
     md = post_race_debrief(_season(), 'R3', forecast=forecast)
     assert 'matched **3/3** of the podium' in md
+    # The forecast is built from the rounds before the race, so it is a
+    # pre-race forecast, not a retrospective check.
+    assert 'Pre-race forecast' in md
+    assert 'Retrospective' not in md
+
+
+def test_debrief_retrospective_forecast_is_labelled():
+    """Regression: a forecast that saw the race's own result was reported
+    as a forecast accuracy figure."""
+    forecast = pd.DataFrame({'Driver': ['A1', 'B1', 'A2', 'B2', 'C1']})
+    md = post_race_debrief(_season(), 'R3', forecast=forecast,
+                           forecast_includes_race=True)
+    assert 'Retrospective model check' in md
+    assert 'not a forecast accuracy figure' in md
+    assert 'matched **3/3** of the podium' in md
 
 
 def test_debrief_forecast_miss_reported_honestly():
@@ -144,6 +159,22 @@ def test_pre_race_briefing_excludes_future_races():
     md = pre_race_briefing(_season(), grid, race='R3')
     assert '50' in md
     assert '100' not in md
+
+
+def test_pre_race_briefing_excludes_the_target_race_with_rounds():
+    """The look-ahead cut works on the calendar round, not the row layout."""
+    rows = []
+    for round_no, track in ((1, 'R1'), (2, 'R2'), (3, 'R3')):
+        rows.append({'Track': track, 'Round': round_no, 'Position': 1,
+                     'Driver': 'A1', 'Team': 'A', 'Starting Grid': 1,
+                     'Points': 25, 'SessionType': 'Race'})
+    df = pd.DataFrame(rows)
+    grid = {'A1': 1}
+
+    md = pre_race_briefing(df, grid, race='R3')
+    # Before R3 A1 had 50 points, not 75.
+    assert '50' in md
+    assert '75' not in md
 
 
 def test_debrief_after_standings_only_through_race():

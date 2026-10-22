@@ -11,3 +11,4 @@ streamlit>=1.36.0
 
 # F1 data
 fastf1>=3.0.0
+requests>=2.31.0

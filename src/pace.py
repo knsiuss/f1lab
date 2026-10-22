@@ -37,6 +37,13 @@ GREEN_TRACK_STATUS = {1}
 # Minimum clean laps before a pace/degradation estimate is shown at all.
 MIN_LAPS_FOR_FIT = 2
 
+# Tyre age of a "fresh" tyre in FastF1's lap tables: TyreLife counts the lap a
+# tyre is used on, so the first lap on a new set is TyreLife == 1, not 0. The
+# fresh-tyre pace is therefore the fitted line evaluated at age 1. The age-0
+# intercept of the same fit is one lap of degradation more optimistic, so it is
+# reported separately instead of being passed off as the fresh-tyre pace.
+FRESH_TYRE_AGE = 1.0
+
 # Sample-size thresholds for the data-quality labels in data_quality(). These
 # define the honesty contract shared across modules: "good" needs at least
 # GOOD_LAPS clean laps, "moderate" at least MODERATE_LAPS; anything above
@@ -138,7 +145,14 @@ def data_quality(n: int) -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 
 def _fit_base_degradation(clean: pd.DataFrame) -> Optional[Dict[str, float]]:
-    """Least-squares fit of lap time vs tyre age. None when not enough laps."""
+    """Least-squares fit of lap time vs tyre age. None when not enough laps.
+
+    The fit is done in the tyre-age domain (``lap_time = intercept + slope *
+    age``). ``base_pace`` is the fitted lap time at :data:`FRESH_TYRE_AGE`
+    (age 1), i.e. the fresh-tyre pace a driver actually sets on the first lap
+    of a stint. The raw age-0 intercept is kept as ``age0_intercept`` so the
+    one-lap difference is visible instead of hidden.
+    """
     x = clean["TyreLife"].astype(float).to_numpy()
     y = clean["LapTime_s"].astype(float).to_numpy()
     if len(x) < MIN_LAPS_FOR_FIT or np.all(np.isnan(x)):
@@ -155,7 +169,10 @@ def _fit_base_degradation(clean: pd.DataFrame) -> Optional[Dict[str, float]]:
     ss_tot = float(np.sum((y - y.mean()) ** 2))
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
     return {
-        "base_pace": float(intercept),
+        # Fresh-tyre pace: the fitted lap time at the age a new tyre is first
+        # used on, not the age-0 intercept.
+        "base_pace": float(intercept + slope * FRESH_TYRE_AGE),
+        "age0_intercept": float(intercept),
         "deg_per_lap": float(slope),
         "r2": float(r2),
         "n": int(len(x)),
@@ -170,12 +187,15 @@ def normalised_pace_by_stint(
     Per-driver/stint normalised (tyre-age removed) pace.
 
     For each stint, when enough clean laps exist, ``BasePace`` is the fitted
-    fresh-tyre lap time (estimated). Otherwise only the raw mean is shown and
-    the quality is downgraded. ``DegPerLap`` is the estimated degradation.
+    fresh-tyre lap time (estimated) -- the fitted line evaluated at tyre age 1,
+    the age a new tyre is first used on. ``Age0Intercept`` is the raw intercept
+    of the same fit (age 0) and is kept only for transparency: it is one lap
+    of degradation more optimistic than the fresh-tyre pace. ``DegPerLap`` is
+    the estimated degradation.
 
     Returns:
         DataFrame with columns Driver, Stint, Compound, N, MeanPace,
-        BasePace (est), DegPerLap (est), Level, Confidence.
+        BasePace (est), Age0Intercept (est), DegPerLap (est), Level, Confidence.
     """
     clean = _clean_pool(laps)
     if clean.empty:
@@ -197,14 +217,16 @@ def normalised_pace_by_stint(
         quality = data_quality(n)
         if fit is not None:
             base = round(fit["base_pace"], 3)
+            age0 = round(fit["age0_intercept"], 3)
             deg = round(fit["deg_per_lap"], 4)
         else:
-            base, deg = None, None
+            base, age0, deg = None, None, None
         rows.append({
             **row,
             "N": n,
             "MeanPace": round(mean_pace, 3),
             "BasePace": base,
+            "Age0Intercept": age0,
             "DegPerLap": deg,
             "Level": quality["level"],
             "Confidence": quality["confidence"],
@@ -246,6 +268,7 @@ def long_run_quality(laps: pd.DataFrame, min_stint: int = 10) -> pd.DataFrame:
             "Length": n,
             "MeanPace": round(float(grp["LapTime_s"].mean()), 3),
             "BasePace": round(fit["base_pace"], 3) if fit else None,
+            "Age0Intercept": round(fit["age0_intercept"], 3) if fit else None,
             "DegPerLap": round(fit["deg_per_lap"], 4) if fit else None,
             "Level": quality["level"],
             "Confidence": quality["confidence"],

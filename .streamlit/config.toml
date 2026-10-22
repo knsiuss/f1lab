@@ -18,12 +18,7 @@ port = 8501
 maxUploadSize = 200
 maxMessageSize = 200
 headless = true
-enableCORS = false
+# enableCORS = false only works together with enableXsrfProtection = false;
+# Streamlit overrides CORS back to true otherwise, so the pair was removed
+# instead of leaving two options that silently disagree.
 enableXsrfProtection = true
-
-[global]
-# Enables or disables the Streamlit telemetry, which is usage statistics
-# sent to Streamlit.
-# If you care about privacy, disable this.
-logTelemetry = false
-dataFrameSerialization = "legacy"

@@ -177,6 +177,33 @@ class TestFingerprint:
         # Only one clean lap remains; median of its single trap value.
         assert fp.iloc[0]['TopSpeed'] == 300.0
 
+    def test_cornering_block_is_filled_when_the_session_has_telemetry(self):
+        """The cornering metrics need the car's telemetry.
+
+        The Analysis page loads the session with ``load_telemetry=True`` for
+        exactly this reason; without it every driver row came back with an
+        empty cornering block.
+        """
+        laps = _laps_frame({'AAA': [(90, 300)]})
+        # Four corners, so the cornering block passes its own gate.
+        car = _car_data_frame(_trace_with_corners([100.0, 110.0, 120.0, 130.0]))
+
+        session = type('Session', (), {})()
+        session.laps = laps
+
+        # Patch the lap lookup: the fastest clean lap carries the car data.
+        import src.setupfingerprint as sf
+        original = sf._driver_car_data
+        try:
+            sf._driver_car_data = lambda sess, clean, driver: car
+            fp = fingerprint(laps, session=session)
+        finally:
+            sf._driver_car_data = original
+
+        row = fp.iloc[0]
+        assert row['SlowApex'] is not None
+        assert row['CornersDetected'] >= 4
+
 
 class TestNormaliseFingerprint:
     def test_session_best_index_is_one(self):

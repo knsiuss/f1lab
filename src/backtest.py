@@ -4,12 +4,14 @@ backtest.py
 ~~~~~~~~~~~
 Walk-forward historical backtest of the prediction model vs a baseline.
 
-The prediction model (src/prediction.py) is a transparent heuristic: grid
-advantage, team pace and driver form weighted into a composite score. A
-backtest that trained on the same season it scored would flatter it, so this
-module walks the season race by race: each race is scored using a model
-trained only on races *before* it (no look-ahead / no leakage), and the
-result is compared with the race's actual finishing order.
+The prediction model (src/prediction.py) is a ridge regression on lagged
+features: grid position, team pace, driver form, positions gained and finish
+reliability. A backtest that trained on the same season it scored would
+flatter it, so this module walks the season race by race: each race is scored
+using a model trained only on races *before* it (no look-ahead / no leakage),
+and the result is compared with the race's actual finishing order. The
+``Engine`` column says which engine produced each forecast -- ``ridge`` or the
+documented ``heuristic`` fallback used when the history is too short to fit.
 
 The baseline is deliberately naive: "the finishing order equals the
 qualifying grid order." F1's grid is strongly predictive, so a model that
@@ -21,7 +23,14 @@ Data Honesty contract:
     * races with too few drivers, or without enough prior history, are
       skipped and counted, not silently averaged in,
     * the summary reports sample sizes and both model and baseline, so a
-      misleading "we're better" claim is visible at a glance.
+      misleading "we're better" claim is visible at a glance,
+    * the summary says plainly whether the model beat the baseline
+      (``beats_baseline`` / ``verdict``) instead of leaving the caller to
+      compare two numbers and hope they notice.
+
+The season frame holds race *and* sprint rows. Every helper here says which
+session it uses: the race helpers default to the **race** rows so a sprint
+result can never override the race result for the same weekend.
 
 :copyright: (c) 2025 F1 Analytics
 :license: MIT
@@ -37,7 +46,7 @@ import pandas as pd
 # (as `backtest` from a page, or as `src.backtest` from the test suite).
 sys.path.insert(0, str(Path(__file__).parent))
 
-from prediction import fantasy_points, predict_race
+from prediction import fantasy_points, predict_race, rows_before_race  # noqa: E402
 
 ESTIMATED = "estimated"
 
@@ -61,26 +70,58 @@ METRICS: Dict[str, str] = {
 # Race helpers
 # ---------------------------------------------------------------------------
 
-def race_grid(race_df: pd.DataFrame) -> Dict[str, int]:
-    """Map {driver: starting grid position} for one race."""
-    if race_df is None or race_df.empty or 'Driver' not in race_df.columns:
+def _session_rows(race_df: pd.DataFrame,
+                  session_type: Optional[str] = 'Race') -> pd.DataFrame:
+    """Rows of the requested session type.
+
+    The season frame carries race and sprint rows for the same weekend. The
+    default is the **race** rows: a sprint result must never override the
+    race result of the same round. Pass ``session_type=None`` to use every
+    row, or another value (e.g. ``"Sprint"``) to pick a session explicitly.
+    """
+    if race_df is None or race_df.empty:
+        return pd.DataFrame()
+    if session_type is not None and 'SessionType' in race_df.columns:
+        return race_df[race_df['SessionType'] == session_type]
+    return race_df
+
+
+def race_grid(race_df: pd.DataFrame,
+              session_type: Optional[str] = 'Race') -> Dict[str, int]:
+    """Map {driver: starting grid position} for one race.
+
+    Args:
+        race_df: rows of the race (may contain several session types).
+        session_type: which session to read ('Race' by default; None uses
+            every row).
+    """
+    rows = _session_rows(race_df, session_type)
+    if rows.empty or 'Driver' not in rows.columns:
         return {}
-    if 'Starting Grid' in race_df.columns:
-        grid = pd.to_numeric(race_df['Starting Grid'], errors='coerce')
-        out = {d: int(g) for d, g in zip(race_df['Driver'], grid)
+    if 'Starting Grid' in rows.columns:
+        grid = pd.to_numeric(rows['Starting Grid'], errors='coerce')
+        out = {d: int(g) for d, g in zip(rows['Driver'], grid)
                if pd.notna(g)}
     else:
         out = {}
     return {d: g for d, g in out.items()}
 
 
-def race_actual(race_df: pd.DataFrame) -> Dict[str, int]:
-    """Map {driver: finishing position} for one race."""
-    if (race_df is None or race_df.empty or 'Driver' not in race_df.columns
-            or 'Position' not in race_df.columns):
+def race_actual(race_df: pd.DataFrame,
+                session_type: Optional[str] = 'Race') -> Dict[str, int]:
+    """Map {driver: finishing position} for one race.
+
+    Args:
+        race_df: rows of the race (may contain several session types).
+        session_type: which session to read ('Race' by default; None uses
+            every row).
+    """
+    rows = _session_rows(race_df, session_type)
+    if (rows.empty or 'Driver' not in rows.columns
+            or 'Position' not in rows.columns):
         return {}
-    pos = pd.to_numeric(race_df['Position'], errors='coerce')
-    return {d: int(p) for d, p in zip(race_df['Driver'], pos) if pd.notna(p)}
+    pos = pd.to_numeric(rows['Position'], errors='coerce')
+    return {d: int(p) for d, p in zip(rows['Driver'], pos) if pd.notna(p)}
 
 
 def grid_baseline(grid: Dict[str, int]) -> List[str]:
@@ -132,13 +173,21 @@ def spearman_rank(pred: Dict[str, int], actual: Dict[str, int]) -> Optional[floa
 
 
 def podium_overlap(pred: Dict[str, int], actual: Dict[str, int], n: int = 3) -> Optional[float]:
-    """Fraction of the predicted top-n that actually finished top-n."""
+    """Fraction of the predicted top-n that actually finished top-n.
+
+    The denominator is the number of drivers actually considered
+    (``min(n, len(common))``): a race scored on two drivers -- the minimum
+    this module accepts -- must not report a perfect overlap as 2/3.
+    """
     common = _common(pred, actual)
     if common is None:
         return None
-    pred_top = set(d for d, v in sorted(common.items(), key=lambda kv: kv[1][0])[:n])
-    act_top = set(d for d, v in sorted(common.items(), key=lambda kv: kv[1][1])[:n])
-    return round(len(pred_top & act_top) / n, 3)
+    considered = min(int(n), len(common))
+    if considered <= 0:
+        return None
+    pred_top = set(d for d, v in sorted(common.items(), key=lambda kv: kv[1][0])[:considered])
+    act_top = set(d for d, v in sorted(common.items(), key=lambda kv: kv[1][1])[:considered])
+    return round(len(pred_top & act_top) / considered, 3)
 
 
 def points_mae(pred: Dict[str, int], actual: Dict[str, int]) -> Optional[float]:
@@ -192,7 +241,20 @@ def evaluate_race(
 # ---------------------------------------------------------------------------
 
 def _race_order(season_df: pd.DataFrame) -> List[str]:
-    """Chronological race list = first-appearance order of the Track column."""
+    """Chronological race list.
+
+    With a ``Round`` column (the new season frame) the order is the calendar
+    order of the rounds; without one it falls back to the first-appearance
+    order of ``Track``.
+    """
+    if 'Round' in season_df.columns:
+        rounds = pd.to_numeric(season_df['Round'], errors='coerce')
+        ordered = (season_df.assign(_r=rounds)
+                   .dropna(subset=['_r'])
+                   .sort_values('_r', kind='stable'))
+        order = list(dict.fromkeys(ordered['Track'].astype(str).tolist()))
+        if order:
+            return order
     return list(dict.fromkeys(season_df['Track'].astype(str).tolist()))
 
 
@@ -204,16 +266,26 @@ def walk_forward_backtest(
     Score every race with a model trained only on the races before it.
 
     Each race from ``min_train_races`` onward is predicted with a model fit on
-    the preceding races only (no leakage), compared against the grid baseline
-    on the same actuals. Races without enough history or too few drivers are
-    skipped and counted.
+    the preceding rounds only (no leakage), compared against the grid baseline
+    on the same actuals. Races without enough history, without a grid, or with
+    too few drivers are skipped and counted.
+
+    The season is walked in calendar order (the ``Round`` column when the
+    frame has it), and the training set is cut on the same round boundary as
+    the target race, so a race is never predicted from data that includes
+    itself.
 
     Returns:
         ``(per_race_df, summary)``. ``per_race_df`` has one row per backtested
         race with model and baseline metrics; ``summary`` reports means, how
-        often the model beat the baseline per metric, and sample sizes.
+        often the model beat the baseline per metric, the sample sizes and
+        whether the model beat the baseline overall (``beats_baseline`` plus
+        a human-readable ``verdict``).
     """
-    empty_summary = {"n_races": 0, "n_races_skipped": 0, "estimated": ESTIMATED}
+    empty_summary = {"n_races": 0, "n_races_skipped": 0, "estimated": ESTIMATED,
+                     "beats_baseline": None,
+                     "verdict": "Not enough scored races to compare the model "
+                                "with the grid baseline."}
     if season_df is None or season_df.empty or 'Track' not in season_df.columns:
         return pd.DataFrame(), empty_summary
 
@@ -222,8 +294,10 @@ def walk_forward_backtest(
     skipped = 0
 
     for i in range(min_train_races, len(order)):
-        train = season_df[season_df['Track'].isin(order[:i])]
-        target = season_df[season_df['Track'] == order[i]]
+        target_track = order[i]
+        # No look-ahead: the training set is cut on the round boundary.
+        train = rows_before_race(season_df, target_track)
+        target = season_df[season_df['Track'] == target_track]
 
         grid = race_grid(target)
         if not grid:
@@ -238,7 +312,8 @@ def walk_forward_backtest(
 
         model_m, baseline_m, n = ev
         row: Dict[str, object] = {
-            "Race": order[i], "N": n, "Estimated": ESTIMATED,
+            "Race": target_track, "N": n, "Estimated": ESTIMATED,
+            "Engine": pred.attrs.get("engine", ""),
         }
         for m in METRICS:
             row[f"{m}_model"] = model_m.get(m)
@@ -250,16 +325,35 @@ def walk_forward_backtest(
     return per_race, summary
 
 
+def summarise(per_race: pd.DataFrame,
+              skipped: int = 0) -> Dict[str, object]:
+    """Public summary step: the same aggregation ``walk_forward_backtest`` uses.
+
+    Kept as a named function so a caller holding its own ``per_race`` frame
+    (a page, a notebook, a test) can get the honest comparison -- means, the
+    per-metric win counts, the engine split and the plain verdict -- without
+    re-running the whole walk-forward.
+    """
+    return _summarize(per_race, skipped)
+
+
 def _summarize(per_race: pd.DataFrame, skipped: int) -> Dict[str, object]:
     """Aggregate per-race metrics into an honest comparison summary."""
     if per_race is None or per_race.empty:
-        return {"n_races": 0, "n_races_skipped": skipped, "estimated": ESTIMATED}
+        return {"n_races": 0, "n_races_skipped": skipped, "estimated": ESTIMATED,
+                "beats_baseline": None,
+                "verdict": "Not enough scored races to compare the model with "
+                           "the grid baseline."}
 
     summary: Dict[str, object] = {
         "n_races": len(per_race),
         "n_races_skipped": skipped,
         "estimated": ESTIMATED,
     }
+    if "Engine" in per_race.columns:
+        engines = per_race["Engine"].fillna("").astype(str)
+        summary["n_engine_ridge"] = int((engines == "ridge").sum())
+        summary["n_engine_fallback"] = int((engines != "ridge").sum())
     for m, direction in METRICS.items():
         col_model = f"{m}_model"
         col_base = f"{m}_baseline"
@@ -268,7 +362,41 @@ def _summarize(per_race: pd.DataFrame, skipped: int) -> Dict[str, object]:
         summary[f"{m}_model_beats_baseline"] = _win_count(
             per_race[col_model], per_race[col_base], direction
         )
+    summary.update(_verdict(summary))
     return summary
+
+
+def _verdict(summary: Dict[str, object]) -> Dict[str, object]:
+    """Did the model beat the grid baseline? Say so in plain words.
+
+    The honest comparison is the position error (MAE, lower is better): a
+    model that cannot predict the finishing order better than "the result is
+    the grid" is not adding value, and the caller should be told rather than
+    left to compare two numbers.
+    """
+    model = summary.get("mae_model")
+    baseline = summary.get("mae_baseline")
+    n_races = summary.get("n_races")
+    if model is None or baseline is None:
+        return {"beats_baseline": None,
+                "verdict": "Not enough scored races to compare the model with "
+                           "the grid baseline."}
+    if model < baseline:
+        beats = True
+        verdict = (f"The model beats the grid baseline over {n_races} scored "
+                   f"races (position MAE {model} vs {baseline}).")
+    elif model == baseline:
+        beats = False
+        verdict = (f"The model only matches the grid baseline over {n_races} "
+                   f"scored races (position MAE {model} vs {baseline}): it adds "
+                   f"nothing over 'the result is the grid'.")
+    else:
+        beats = False
+        verdict = (f"The model does NOT beat the grid baseline over {n_races} "
+                   f"scored races (position MAE {model} vs {baseline}): the "
+                   f"grid remains the stronger predictor, so the forecast is a "
+                   f"ranking guide, not a prediction.")
+    return {"beats_baseline": beats, "verdict": verdict}
 
 
 def _mean(col: pd.Series) -> Optional[float]:

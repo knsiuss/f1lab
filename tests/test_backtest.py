@@ -21,9 +21,10 @@ from src.backtest import (
     race_actual,
     race_grid,
     spearman_rank,
+    summarise,
     walk_forward_backtest,
 )
-from src.prediction import predict_race
+from src.prediction import model_caveat, predict_race
 
 # Fixed grid order reused across every synthetic race.
 GRID = ['A1', 'B1', 'A2', 'C1', 'B2']
@@ -189,3 +190,193 @@ def test_walk_forward_empty_inputs():
     per_race, summary = walk_forward_backtest(pd.DataFrame())
     assert per_race.empty
     assert summary['n_races'] == 0
+
+
+# ---------------------------------------------------------------------------
+# Session types: a sprint row must never override the race row
+# ---------------------------------------------------------------------------
+
+def _race_plus_sprint_frame():
+    """One round with a race row and a sprint row per driver."""
+    rows = []
+    for session, positions in (('Race', {'A1': 1, 'B1': 2}),
+                               ('Sprint', {'A1': 2, 'B1': 1})):
+        for driver, pos in positions.items():
+            rows.append({
+                'Track': 'R1', 'Round': 1, 'SessionType': session,
+                'Driver': driver, 'Team': driver[0], 'Position': pos,
+                'Starting Grid': pos,
+            })
+    return pd.DataFrame(rows)
+
+
+def test_race_grid_ignores_sprint_rows():
+    """The combined frame must not let the sprint override the grid."""
+    frame = _race_plus_sprint_frame()
+    grid = race_grid(frame)
+    assert grid == {'A1': 1, 'B1': 2}
+
+
+def test_race_actual_ignores_sprint_rows():
+    """The combined frame must not let the sprint override the result."""
+    frame = _race_plus_sprint_frame()
+    actual = race_actual(frame)
+    assert actual == {'A1': 1, 'B1': 2}
+
+
+def test_race_helpers_can_read_the_sprint_session_explicitly():
+    """A caller that wants the sprint asks for it."""
+    frame = _race_plus_sprint_frame()
+    assert race_grid(frame, session_type='Sprint') == {'A1': 2, 'B1': 1}
+    assert race_actual(frame, session_type='Sprint') == {'A1': 2, 'B1': 1}
+
+
+def test_walk_forward_uses_race_rows_of_the_target_round():
+    """A sprint row in the target round must not become the grid."""
+    frame = _race_plus_sprint_frame()
+    frame.loc[frame['SessionType'] == 'Sprint', 'Starting Grid'] = 9
+    per_race, summary = walk_forward_backtest(frame, min_train_races=0)
+    # The race grid (1, 2) is used, so the race is scored, not skipped.
+    assert summary['n_races'] == 1
+    assert summary['n_races_skipped'] == 0
+
+
+# ---------------------------------------------------------------------------
+# Podium overlap: the denominator is the number of drivers considered
+# ---------------------------------------------------------------------------
+
+def test_podium_overlap_with_two_drivers_is_full_overlap():
+    """Two drivers (the module's minimum) must not report 2/3 as the score."""
+    pred = {'A': 1, 'B': 2}
+    actual = {'A': 1, 'B': 2}
+    assert podium_overlap(pred, actual) == pytest.approx(1.0)
+
+
+def test_podium_overlap_with_two_drivers_partial():
+    """With two drivers both are inside the top-2, so the overlap is full."""
+    pred = {'A': 1, 'B': 2}
+    actual = {'A': 2, 'B': 1}
+    # The order swaps but the *set* of top-2 drivers is the same, so this is
+    # a full overlap -- and it is scored out of 2, not out of 3.
+    assert podium_overlap(pred, actual) == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# Calendar order and the honest verdict
+# ---------------------------------------------------------------------------
+
+def _rounds_frame(order=None):
+    """Four rounds with a 'Round' column; ``order`` shuffles the rows."""
+    rows = []
+    for rnd in range(1, 5):
+        for pos, driver in enumerate(['A1', 'B1', 'A2', 'C1', 'B2'], start=1):
+            rows.append({
+                'Track': f'R{rnd}', 'Round': rnd, 'SessionType': 'Race',
+                'Driver': driver, 'Team': driver[0], 'Position': pos,
+                'Starting Grid': pos,
+            })
+    df = pd.DataFrame(rows)
+    if order == 'reversed':
+        df = df.iloc[::-1].reset_index(drop=True)
+    return df
+
+
+def test_walk_forward_follows_the_round_column():
+    """The walk-forward order is the calendar order, not the row order."""
+    per_race, _ = walk_forward_backtest(_rounds_frame(), min_train_races=2)
+    assert list(per_race['Race']) == ['R3', 'R4']
+    reversed_per_race, _ = walk_forward_backtest(
+        _rounds_frame(order='reversed'), min_train_races=2)
+    assert list(reversed_per_race['Race']) == ['R3', 'R4']
+
+
+def test_summary_says_whether_the_model_beats_the_baseline():
+    """The summary reports the comparison instead of leaving it to be found."""
+    per_race, summary = walk_forward_backtest(_rounds_frame(), min_train_races=1)
+    assert 'beats_baseline' in summary
+    assert 'verdict' in summary
+    assert isinstance(summary['beats_baseline'], bool)
+    assert 'grid baseline' in summary['verdict']
+
+
+def test_summary_verdict_reports_a_model_that_does_not_win():
+    """A model that does not beat the grid baseline must say so."""
+    per_race, summary = walk_forward_backtest(_rounds_frame(), min_train_races=1)
+    if summary['mae_model'] >= summary['mae_baseline']:
+        assert summary['beats_baseline'] is False
+        assert ('does NOT beat' in summary['verdict']
+                or 'only matches' in summary['verdict'])
+    else:
+        assert summary['beats_baseline'] is True
+        assert 'beats the grid baseline' in summary['verdict']
+
+
+# ---------------------------------------------------------------------------
+# Ridge engine and the honest model-vs-baseline comparison
+# ---------------------------------------------------------------------------
+
+DRIVERS = ['A1', 'A2', 'A3', 'A4', 'A5']
+
+
+def _inverted_season(rounds=8):
+    """A season where the finish order is the grid order reversed.
+
+    The grid never changes, so "the result is the grid" is badly wrong (2.4
+    places out on average) and there is a stable pattern for a real model to
+    learn: the car that starts further back finishes further forward.
+    """
+    rows = []
+    n = len(DRIVERS)
+    for rnd in range(1, rounds + 1):
+        for i, driver in enumerate(DRIVERS):
+            rows.append({
+                'Round': rnd, 'Track': f'R{rnd}', 'SessionType': 'Race',
+                'Driver': driver,
+                'Team': 'Alpha' if i < 3 else 'Beta',
+                'Starting Grid': i + 1,
+                'Position': n - i,
+                'Points': 25 - 5 * i,
+                'Finished': 1,
+            })
+    return pd.DataFrame(rows)
+
+
+def test_backtest_reports_which_engine_scored_each_race():
+    """Every row says whether a real fit or the fallback produced it."""
+    per_race, summary = walk_forward_backtest(_inverted_season(),
+                                              min_train_races=1)
+    assert 'Engine' in per_race.columns
+    assert set(per_race['Engine']) <= {'ridge', 'heuristic'}
+    assert (summary['n_engine_ridge'] + summary['n_engine_fallback']
+            == summary['n_races'])
+    # The earliest scored races have too little history; the regression takes
+    # over once there is enough.
+    assert summary['n_engine_fallback'] >= 1
+    assert summary['n_engine_ridge'] >= 1
+    assert list(per_race['Engine'])[-1] == 'ridge'
+
+
+def test_walk_forward_model_beats_the_grid_on_a_learnable_pattern():
+    """A pattern the model can learn from history must beat copying the grid."""
+    per_race, summary = walk_forward_backtest(_inverted_season(),
+                                              min_train_races=1)
+    assert summary['beats_baseline'] is True
+    assert summary['mae_model'] < summary['mae_baseline']
+    assert summary['mae_model_beats_baseline'] >= 4
+    assert 'beats the grid baseline' in summary['verdict']
+
+
+def test_public_summarise_matches_the_walk_forward_summary():
+    """``summarise`` is the same aggregation the walk-forward returns."""
+    per_race, summary = walk_forward_backtest(_inverted_season(),
+                                              min_train_races=1)
+    assert summarise(per_race, summary['n_races_skipped']) == summary
+
+
+def test_caveat_generated_from_the_measured_backtest():
+    """The page shows the caveat: it must quote what the backtest measured."""
+    _, summary = walk_forward_backtest(_inverted_season(), min_train_races=1)
+    text = model_caveat(summary)
+    assert f"{summary['mae_model']:.3f}" in text
+    assert f"{summary['mae_baseline']:.3f}" in text
+    assert 'does beat the baseline' in text

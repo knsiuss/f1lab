@@ -30,7 +30,12 @@ import pandas as pd
 # (as `briefing` from a page, or as `src.briefing` from the test suite).
 sys.path.insert(0, str(Path(__file__).parent))
 
-from prediction import compute_driver_form, compute_team_pace, predict_race
+from prediction import (
+    compute_driver_form,
+    compute_team_pace,
+    predict_race,
+    rows_before_race,
+)
 
 ESTIMATED = "estimated"
 
@@ -49,13 +54,33 @@ def _race_rows(df: pd.DataFrame, race: str) -> pd.DataFrame:
     return out
 
 
+def _track_order(df: pd.DataFrame) -> list:
+    """Calendar order of the tracks in a frame.
+
+    The ``Round`` column is authoritative when the frame has one; otherwise
+    the first-appearance order of the Track column is used.
+    """
+    if df is None or df.empty or 'Track' not in df.columns:
+        return []
+    if 'Round' in df.columns:
+        rounds = pd.to_numeric(df['Round'], errors='coerce')
+        if rounds.notna().any():
+            ordered = (df.assign(_round=rounds)
+                         .dropna(subset=['_round'])
+                         .sort_values('_round', kind='stable'))
+            tracks = list(dict.fromkeys(ordered['Track'].dropna().astype(str).tolist()))
+            if tracks:
+                return tracks
+    return list(dict.fromkeys(df['Track'].dropna().astype(str).tolist()))
+
+
 def _standings(df: pd.DataFrame, up_to_race: Optional[str] = None) -> Optional[pd.Series]:
     """Cumulative driver points; ``up_to_race`` excludes that race and after."""
     if df is None or df.empty or 'Driver' not in df.columns or 'Points' not in df.columns:
         return None
     g = df
     if up_to_race and 'Track' in g.columns:
-        order = list(dict.fromkeys(g['Track'].astype(str)))
+        order = _track_order(g)
         if up_to_race in order:
             g = g[g['Track'].isin(order[:order.index(up_to_race)])]
     if g.empty:
@@ -65,17 +90,20 @@ def _standings(df: pd.DataFrame, up_to_race: Optional[str] = None) -> Optional[p
 
 
 def _df_before(df: pd.DataFrame, race: Optional[str]) -> pd.DataFrame:
-    """Rows for tracks strictly before ``race`` (first-appearance order).
+    """Rows for the rounds strictly before ``race``.
 
-    Unknown/None race falls back to the full frame so callers keep working
-    when the target GP is not in the data (e.g. a future race with no rows).
+    Uses the shared look-ahead cut (:func:`prediction.rows_before_race`) so the
+    briefing can never see the target race or anything after it. Unknown/None
+    race falls back to the full frame so callers keep working when the target
+    GP is not in the data (e.g. a future race with no rows).
     """
     if not race or df is None or df.empty or 'Track' not in df.columns:
         return df
-    order = list(dict.fromkeys(df['Track'].astype(str)))
-    if race not in order:
+    earlier = rows_before_race(df, race)
+    if earlier is None or earlier.empty:
+        # The race is not in the frame: nothing before it can be identified.
         return df
-    return df[df['Track'].isin(order[:order.index(race)])]
+    return earlier
 
 
 def _standings_through(df: pd.DataFrame, race: Optional[str]) -> Optional[pd.Series]:
@@ -84,7 +112,7 @@ def _standings_through(df: pd.DataFrame, race: Optional[str]) -> Optional[pd.Ser
         return None
     g = df
     if race and 'Track' in g.columns:
-        order = list(dict.fromkeys(g['Track'].astype(str)))
+        order = _track_order(g)
         if race in order:
             g = g[g['Track'].isin(order[:order.index(race) + 1])]
     if g.empty:
@@ -99,8 +127,10 @@ def _grid_delta_md(df: pd.DataFrame, race: str) -> List[str]:
     if sub.empty:
         return []
     g = sub.copy()
-    g['_pos'] = pd.to_numeric(g.get('Position'), errors='coerce')
-    g['_grid'] = pd.to_numeric(g.get('Starting Grid'), errors='coerce')
+    g['_pos'] = pd.to_numeric(g['Position'], errors='coerce') if 'Position' in g.columns \
+        else pd.Series(float('nan'), index=g.index)
+    g['_grid'] = pd.to_numeric(g['Starting Grid'], errors='coerce') if 'Starting Grid' in g.columns \
+        else pd.Series(float('nan'), index=g.index)
     g = g.dropna(subset=['_pos', '_grid'])
     if g.empty:
         return []
@@ -195,7 +225,8 @@ def pre_race_briefing(df: pd.DataFrame, grid: Dict[str, int],
 # ---------------------------------------------------------------------------
 
 def post_race_debrief(df: pd.DataFrame, race: str,
-                      forecast: Optional[pd.DataFrame] = None) -> str:
+                      forecast: Optional[pd.DataFrame] = None,
+                      forecast_includes_race: bool = False) -> str:
     """Data-driven debrief of what actually happened at ``race``.
 
     Args:
@@ -203,6 +234,10 @@ def post_race_debrief(df: pd.DataFrame, race: str,
         race: grand prix name.
         forecast: optional ``predict_race`` output for this race; when given,
             its podium call is checked against the real podium.
+        forecast_includes_race: set when the forecast was built from rows
+            that already contain this race's own result. Such a forecast is
+            retrospective, not a prediction, and the debrief says so instead
+            of reporting it as a pre-race call.
 
     Returns:
         Markdown string; model figures are flagged estimated.
@@ -241,8 +276,19 @@ def post_race_debrief(df: pd.DataFrame, race: str,
         pred_top3 = set(forecast.head(3)['Driver'])
         act_top3 = set(podium['Driver'])
         matched = len(pred_top3 & act_top3)
-        sections.append(
-            f"Forecast (estimated) matched **{matched}/3** of the podium."
-        )
+        if forecast_includes_race:
+            # A forecast that saw the race's own result is a retrospective
+            # check, not a pre-race call: saying so is the honest wording.
+            sections.append(
+                f"Retrospective model check (estimated, forecast built *after* "
+                f"the race and therefore including its result): matched "
+                f"**{matched}/3** of the podium. This is not a forecast "
+                f"accuracy figure."
+            )
+        else:
+            sections.append(
+                f"Pre-race forecast (estimated, built from the rounds before "
+                f"this race) matched **{matched}/3** of the podium."
+            )
 
     return "\n\n".join(sections)

@@ -8,7 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.replay import positions_by_lap
+from src.replay import build_position_replay, positions_by_lap
 
 
 def test_positions_pivot_basic():
@@ -54,3 +54,40 @@ def test_positions_missing_columns():
     laps = pd.DataFrame({'Driver': ['a'], 'LapNumber': [1]})  # no Position col
     pivot, _ = positions_by_lap(laps)
     assert pivot.empty
+
+
+# --------------------------------------------------------------------------
+# the animated figure
+# --------------------------------------------------------------------------
+
+def _pivot():
+    return pd.DataFrame({'a': [1, 2], 'b': [2, 1]}, index=[1, 2])
+
+
+def test_position_replay_builds_one_frame_per_lap():
+    fig = build_position_replay(_pivot(), {'a': 'Ferrari', 'b': 'McLaren'})
+    assert len(fig.frames) == 2
+    assert [frame.name for frame in fig.frames] == ['1', '2']
+
+
+def test_position_replay_lap_counter_uses_its_own_axis():
+    """The lap counter must not add a category to the driver axis.
+
+    The counter used to be a trace with a numeric x on the categorical
+    driver axis, which put a stray "1" tick on it.
+    """
+    fig = build_position_replay(_pivot(), {'a': 'Ferrari', 'b': 'McLaren'})
+    counters = [trace for frame in fig.frames for trace in frame.data
+                if trace.xaxis == 'x2']
+    assert counters, "the lap counter should live on the overlaid axis"
+    for frame in fig.frames:
+        for trace in frame.data:
+            if trace.xaxis == 'x2':
+                continue
+            assert all(isinstance(x, str) for x in trace.x), trace.x
+    assert fig.layout.xaxis2.overlaying == 'x'
+
+
+def test_position_replay_of_an_empty_pivot_is_an_empty_figure():
+    fig = build_position_replay(pd.DataFrame(), {})
+    assert not fig.frames

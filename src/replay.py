@@ -100,10 +100,12 @@ def build_position_replay(
                     name=d,
                     hovertemplate=f"<b>{d}</b> &mdash; P{int(row[d])}<extra></extra>",
                 ))
-        # lap counter trace
+        # Lap counter trace. It lives on its own overlaid axis: the driver
+        # axis is categorical, so a numeric x here would add a stray "1"
+        # category to it.
         data.append(go.Scatter(
-            x=[lap_list[0]], y=[max_pos - 1], mode='text',
-            text=[f"Lap {int(lap)}"], textposition='middle left',
+            x=[0.99], y=[0.8], xaxis='x2', mode='text',
+            text=[f"Lap {int(lap)}"], textposition='middle right',
             textfont=dict(size=18, color='#E10600'),
             hoverinfo='skip', showlegend=False,
         ))
@@ -133,11 +135,16 @@ def build_position_replay(
 
     fig.update_layout(
         title=dict(text=title, x=0.02, font=dict(size=16, color='white')),
-        yaxis=dict(autorange='reversed', range=[1, max_pos],
+        yaxis=dict(autorange='reversed', range=[0.4, max_pos],
                    title=dict(text='Position', font=dict(size=12, color='#888')),
                    tickfont=dict(size=11, color='#888')),
         xaxis=dict(title=dict(text='Driver', font=dict(size=12, color='#888')),
                    tickfont=dict(size=10, color='#ccc')),
+        # Overlay for the lap counter: a linear axis on top of the categorical
+        # driver axis, so the counter can sit in the corner without adding a
+        # category of its own.
+        xaxis2=dict(overlaying='x', type='linear', range=[0, 1],
+                    visible=False, fixedrange=True),
         paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
         margin=dict(l=50, r=30, t=60, b=80),
         updatemenus=[dict(type='buttons', showactive=False, x=0.02, y=1.12,

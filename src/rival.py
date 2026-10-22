@@ -58,6 +58,62 @@ def _standings(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     return g if not g.empty else None
 
 
+def _numeric_column(df: pd.DataFrame, column: str) -> pd.Series:
+    """A numeric view of a column, or all-NaN when the column is missing.
+
+    ``df.get(column)`` returns ``None`` for a missing column and
+    ``pd.to_numeric(None)`` returns the boolean ``False`` -- indexing a frame
+    with that raises ``KeyError: False``.
+    """
+    if column in df.columns:
+        return pd.to_numeric(df[column], errors='coerce')
+    return pd.Series(float('nan'), index=df.index, dtype=float)
+
+
+def _races_at(sub: pd.DataFrame) -> int:
+    """Number of races covered by a slice of the season frame.
+
+    The sample behind a circuit figure is the number of *races* run there,
+    not the number of drivers who drove them: one race with twenty drivers is
+    still a sample of one.
+
+    A race is identified by its session key when the frame has one, then by
+    its calendar round. Without either, the distinct track names are the best
+    available approximation.
+    """
+    if sub is None or sub.empty:
+        return 0
+    if 'SessionKey' in sub.columns:
+        sessions = sub['SessionKey'].dropna().nunique()
+        if sessions:
+            return int(sessions)
+    if 'Round' in sub.columns:
+        rounds = pd.to_numeric(sub['Round'], errors='coerce').dropna().nunique()
+        if rounds:
+            return int(rounds)
+    if 'Track' in sub.columns:
+        return int(sub['Track'].nunique())
+    return 0
+
+
+def _fastest_lap_driver(sub: pd.DataFrame) -> Optional[str]:
+    """Driver who set the fastest lap, or None when the data is not loaded.
+
+    The OpenF1 frame carries empty fastest-lap cells unless the lap data was
+    fetched for that session, so an empty column means "not loaded" -- never
+    "nobody set a fastest lap".
+    """
+    if sub is None or sub.empty or 'Set Fastest Lap' not in sub.columns:
+        return None
+    values = sub['Set Fastest Lap'].astype(str).str.strip()
+    if not (values.str.lower() == 'yes').any():
+        return None
+    fl = sub[values.str.lower() == 'yes']
+    if fl.empty:
+        return None
+    return str(fl.iloc[0]['Driver'])
+
+
 def head_to_head(season_df: pd.DataFrame,
                  driver_a: str, driver_b: str) -> Dict[str, object]:
     """Rival head-to-head across completed races both drivers finished.
@@ -142,17 +198,22 @@ def build_watchlist(season_df: pd.DataFrame,
         others['_dist'] = others['_gap'].abs()
         nearest = others.sort_values(['_dist', 'Points'],
                                      ascending=[True, False]).head(top - 1)
-        watch = pd.concat([
-            standings[standings['Driver'] == focus].copy(),
-            nearest,
-        ])
+        focus_row = standings[standings['Driver'] == focus].copy()
+        # The focus driver is the reference: their gap to themselves is zero.
+        focus_row['_gap'] = 0
+        watch = pd.concat([focus_row, nearest])
     else:
         watch = standings.head(top).copy()
         watch['_gap'] = (watch['Points'] - watch['Points'].max()).astype(int)
 
     out = watch.sort_values('Points', ascending=False).reset_index(drop=True)
-    out.insert(0, 'Rank', range(1, len(out) + 1))
+    # Rank is the championship position, not the position inside the
+    # watchlist: a driver who is third in the championship stays third.
+    championship_rank = {driver: rank for rank, driver
+                         in enumerate(standings['Driver'], start=1)}
+    out.insert(0, 'Rank', [championship_rank.get(d, 0) for d in out['Driver']])
     out = out.rename(columns={'_gap': 'GapToFocus'})
+    out['GapToFocus'] = pd.to_numeric(out['GapToFocus'], errors='coerce')
     out['Level'] = quality["level"]
     out['Confidence'] = quality["confidence"]
     out['Estimated'] = ESTIMATED
@@ -165,7 +226,9 @@ def circuit_insights(season_df: pd.DataFrame, track: str) -> Dict[str, object]:
 
     Reports the latest winner, the pole position, pole-to-win conversion,
     average places gained by finishers and the fastest-lap setter, all with a
-    data-quality level from the number of completed races at the track.
+    data-quality level from the number of completed races at the track. One
+    race at a circuit is a sample of one, so a single visit is reported as
+    ``insufficient`` rather than as high confidence.
 
     Returns:
         dict (possibly ``level=insufficient``) with the figures and
@@ -184,17 +247,22 @@ def circuit_insights(season_df: pd.DataFrame, track: str) -> Dict[str, object]:
         return {"track": track, "level": "insufficient",
                 "confidence": "low", "estimated": ESTIMATED}
 
-    n = sub['Driver'].nunique() if 'Driver' in sub.columns else 0
-    quality = data_quality(n)
+    # The sample behind these figures is the number of races run at this
+    # circuit -- not the number of drivers who drove them. One race with
+    # twenty drivers is still a sample of one, and calling that "good"
+    # confidence would overstate what the circuit has told us.
+    n_races = _races_at(sub)
+    n_drivers = sub['Driver'].nunique() if 'Driver' in sub.columns else 0
+    quality = data_quality(n_races)
 
     out: Dict[str, object] = {
-        "track": track, "races": 1, "level": quality["level"],
+        "track": track, "races": n_races, "level": quality["level"],
         "confidence": quality["confidence"], "estimated": ESTIMATED,
     }
 
     sub2 = sub.copy()
-    sub2['_pos'] = pd.to_numeric(sub2.get('Position'), errors='coerce')
-    sub2['_grid'] = pd.to_numeric(sub2.get('Starting Grid'), errors='coerce')
+    sub2['_pos'] = _numeric_column(sub2, 'Position')
+    sub2['_grid'] = _numeric_column(sub2, 'Starting Grid')
 
     win = sub2[sub2['_pos'] == 1]
     if not win.empty:
@@ -213,14 +281,16 @@ def circuit_insights(season_df: pd.DataFrame, track: str) -> Dict[str, object]:
             float((fin['_grid'] - fin['_pos']).mean()), 2
         )
 
-    if 'Set Fastest Lap' in sub2.columns:
-        fl = sub2[sub2['Set Fastest Lap'].astype(str).str.strip().str.lower() == 'yes']
-        if not fl.empty:
-            out['fastest_lap'] = fl.iloc[0]['Driver']
+    # The fastest-lap column is empty unless the lap data was fetched for
+    # that session: an empty column means "not loaded", so no fastest-lap
+    # setter is reported rather than a wrong one.
+    fastest = _fastest_lap_driver(sub2)
+    if fastest is not None:
+        out['fastest_lap'] = fastest
 
     out['assumptions'] = [
         "figures cover completed races at this track in the selected season",
-        f"{n} drivers scored",
+        f"{n_races} race(s) at this circuit, {n_drivers} drivers scored",
     ]
     return out
 

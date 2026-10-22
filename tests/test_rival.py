@@ -102,6 +102,31 @@ def test_watchlist_empty_on_no_data():
     assert build_watchlist(pd.DataFrame()).empty
 
 
+def test_watchlist_focus_driver_has_zero_gap():
+    """Regression: the focus driver's own gap was NaN."""
+    wl = build_watchlist(_season(), focus='A1', top=3)
+    focus_row = wl[wl['Driver'] == 'A1'].iloc[0]
+    assert focus_row['GapToFocus'] == 0
+    assert not pd.isna(focus_row['GapToFocus'])
+
+
+def test_watchlist_rank_is_the_championship_position():
+    """Regression: Rank was the watchlist position, not the championship one."""
+    wl = build_watchlist(_season(), focus='B1', top=5)
+    # Championship order: A1, B1, A2, C1, D1 -> B1 is 2nd, A1 is 1st.
+    assert wl[wl['Driver'] == 'B1'].iloc[0]['Rank'] == 2
+    assert wl[wl['Driver'] == 'A1'].iloc[0]['Rank'] == 1
+    assert wl[wl['Driver'] == 'A2'].iloc[0]['Rank'] == 3
+
+
+def test_watchlist_gap_is_signed_around_the_focus():
+    wl = build_watchlist(_season(), focus='B1', top=5)
+    a1 = wl[wl['Driver'] == 'A1'].iloc[0]
+    assert a1['GapToFocus'] > 0     # ahead of the focus driver
+    a2 = wl[wl['Driver'] == 'A2'].iloc[0]
+    assert a2['GapToFocus'] <= 0    # behind the focus driver
+
+
 # ---------------------------------------------------------------------------
 # Circuit insights
 # ---------------------------------------------------------------------------
@@ -119,3 +144,64 @@ def test_circuit_insights_reports_winner_and_pole_to_win():
 def test_circuit_insights_insufficient_missing_track():
     ins = circuit_insights(_season(), 'Monaco')
     assert ins['level'] == 'insufficient'
+
+
+def test_circuit_insights_confidence_follows_the_race_count():
+    """Regression: one race with five drivers was reported as high confidence."""
+    ins = circuit_insights(_season(), 'R1')
+    assert ins['races'] == 1
+    assert ins['level'] == 'insufficient'
+    assert ins['confidence'] == 'low'
+
+
+def test_circuit_insights_confidence_grows_with_more_races():
+    """Three races at the same circuit are a bigger sample than one."""
+    season = pd.concat([_season(), _season(), _season()], ignore_index=True)
+    # Three separate race sessions at the same circuit (15 rows per copy).
+    season['SessionKey'] = [1 + (i // 15) for i in range(len(season))]
+    ins = circuit_insights(season, 'R1')
+    assert ins['races'] == 3
+    assert ins['level'] == 'low'
+    assert ins['confidence'] == 'low'
+
+
+def test_circuit_insights_without_fastest_lap_data_reports_none():
+    """An empty fastest-lap column means "not loaded", not "nobody set one"."""
+    season = _season()
+    season['Set Fastest Lap'] = ''
+    ins = circuit_insights(season, 'R1')
+    assert 'fastest_lap' not in ins
+    assert ins['winner'] == 'A1'
+
+
+def test_circuit_lookup_resolves_the_event_name(monkeypatch):
+    """The Competitor page shows FastF1 event names; the lookup must find them.
+
+    The frame's Track column and the dropdown carry the same names today, but
+    the page resolves the name first, so a frame that still uses the short
+    CSV names ("Australia") keeps working.
+    """
+    import src.season_config as season_config
+
+    monkeypatch.setattr(
+        season_config, 'get_season_calendar',
+        lambda year: [
+            {'round': 1, 'name': 'Australian Grand Prix', 'location': 'Melbourne',
+             'country': 'Australia', 'date': None},
+            {'round': 2, 'name': 'Chinese Grand Prix', 'location': 'Shanghai',
+             'country': 'China', 'date': None},
+        ],
+    )
+
+    season = _season()
+    tracks = list(dict.fromkeys(season['Track'].astype(str).tolist()))
+
+    track = season_config.resolve_csv_track(2025, 'Australian Grand Prix', tracks)
+    assert track == 'R1'
+
+    ins = circuit_insights(season, track)
+    assert ins.get('winner') == 'A1'
+    assert ins.get('races') == 1
+    # One race at the circuit is a sample of one: the label says so.
+    assert ins.get('level') == 'insufficient'
+    assert ins.get('confidence') == 'low'
