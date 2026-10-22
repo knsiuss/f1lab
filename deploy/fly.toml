@@ -1,0 +1,55 @@
+# Fly.io configuration for F1 Lab.
+#
+#   fly launch --copy-config --config deploy/fly.toml --no-deploy
+#   fly deploy --config deploy/fly.toml --dockerfile Dockerfile
+#
+# Note: `fly deploy` builds from the directory that holds the fly.toml unless
+# you pass --dockerfile/--build-context, hence the ".." paths below.
+app = "f1lab"
+primary_region = "sin"          # Singapore: closest region to the 2026 calendar
+kill_signal = "SIGINT"          # Streamlit shuts down cleanly on SIGINT
+kill_timeout = 15
+
+[build]
+  dockerfile = "../Dockerfile"
+
+[env]
+  F1LAB_CACHE_DIR = "/data/f1_cache"
+  STREAMLIT_SERVER_PORT = "8080"
+  STREAMLIT_SERVER_ADDRESS = "0.0.0.0"
+  STREAMLIT_SERVER_HEADLESS = "true"
+  STREAMLIT_BROWSER_GATHER_USAGE_STATS = "false"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # A dashboard is cheap to start (~3 s warm cache) and busy in bursts around
+  # a race weekend, so scale to zero between them.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 40
+    hard_limit = 60
+
+[[http_service.checks]]
+  # Streamlit's own health endpoint: it answers 200 only once the server is
+  # ready to accept sessions, so a cold container is never marked healthy early.
+  grace_period = "30s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/_stcore/health"
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
+
+# The OpenF1 cache (f1_cache/openf1 by default) is what makes a warm page fast.
+# Without this mount every cold machine re-downloads a season (~2 min).
+[[mounts]]
+  source = "f1lab_cache"
+  destination = "/data"

@@ -1,0 +1,139 @@
+name: Refresh OpenF1 data cache
+
+# Data-as-artifact: download the OpenF1 data the app reads, ahead of time, and
+# publish it as the `data-cache` branch. A deployment can then hand the app a
+# ready-made f1_cache/openf1, so a cold start or an OpenF1 outage no longer
+# means empty pages.
+#
+# ---------------------------------------------------------------------------
+# Why a branch and not an uploaded artifact
+# ---------------------------------------------------------------------------
+# The app reads plain files from f1_cache/openf1 at runtime, so the archive has
+# to be on the deployment's disk before the app starts:
+#
+#   * an artifact is a zip that a deploy job must download and unpack, and it
+#     expires (90 days at most) -- a frozen deployment would silently lose its
+#     data, and two deploy paths could disagree about which archive is live;
+#   * a branch is an ordinary git remote: `git clone --depth 1 -b data-cache`
+#     (or `git archive data-cache f1_cache | tar -x`) restores the exact files
+#     the app expects, the data has a reviewable history, and it never expires;
+#   * the cost is git bandwidth, which is bounded: the branch is force-pushed
+#     as ONE commit on top of the default branch, so its history stays at two
+#     commits instead of growing by one a day.
+#
+# The cache is a derivative of OpenF1 data, published under CC BY-NC-SA 4.0:
+# non-commercial use only, attribution required. See docs/DATA_CACHE.md.
+
+on:
+  schedule:
+    # 03:17 UTC, after the last session of an American race weekend has been
+    # ingested. Offset to a non-round minute so it does not queue with every
+    # other nightly job on GitHub's scheduler.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      years:
+        description: 'Seasons to refresh, space separated (empty = this year and last)'
+        required: false
+        default: ''
+      session_limit:
+        description: 'Only the N most recent started sessions per year (0 = all)'
+        required: false
+        default: '0'
+
+concurrency:
+  group: refresh-openf1-cache
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write  # push the data-cache branch
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          # The previous archive lives on the data-cache branch, and the push
+          # rewrites that branch, so its tip has to be reachable.
+          fetch-depth: 0
+
+      - name: Restore the previous archive
+        # The refresh is incremental: start from last night's cache so only
+        # the changed sessions cost a request. A missing branch is the first
+        # run (a full backfill), not an error.
+        run: |
+          set -euo pipefail
+          if git fetch --depth=1 origin data-cache; then
+            git checkout FETCH_HEAD -- f1_cache
+            echo "restored $(find f1_cache/openf1 -name '*.json' | wc -l) cached files"
+          else
+            echo "::warning::no data-cache branch yet: this run builds the archive from scratch"
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        # requirements.txt rather than a one-line `pip install requests`: the
+        # job must run the same openf1_client module the app ships, and pinning
+        # it the same way means a dependency change cannot break the job alone.
+        run: pip install -r requirements.txt
+
+      - name: Refresh the cache
+        env:
+          YEARS: ${{ inputs.years }}
+          SESSION_LIMIT: ${{ inputs.session_limit }}
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -euo pipefail
+          if [ -z "${YEARS:-}" ]; then
+            THIS_YEAR="$(date -u +%Y)"
+            LAST_YEAR="$((THIS_YEAR - 1))"
+            YEARS="${LAST_YEAR} ${THIS_YEAR}"
+          fi
+          ARGS="--years ${YEARS}"
+          if [ "${SESSION_LIMIT:-0}" != "0" ]; then
+            ARGS="${ARGS} --session-limit ${SESSION_LIMIT}"
+          fi
+          echo "running: python tools/refresh_cache.py ${ARGS}"
+          python tools/refresh_cache.py ${ARGS}
+
+      - name: Report the archive
+        run: |
+          set -euo pipefail
+          du -sh f1_cache/openf1
+          find f1_cache/openf1 -name '*.json' | wc -l
+
+      - name: Publish to the data-cache branch
+        # One commit on top of the default branch, force-pushed: the branch is
+        # a snapshot of the archive, not a 365-commit-a-year history. The
+        # previous snapshot was restored above, so nothing is lost.
+        run: |
+          set -euo pipefail
+          FILES="$(find f1_cache/openf1 -name '*.json' | wc -l)"
+          if [ "${FILES}" -eq 0 ]; then
+            echo "::error::the cache is empty: refusing to publish"
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -B data-cache
+          git add -f f1_cache/openf1
+          if git rev-parse -q --verify FETCH_HEAD > /dev/null; then
+            if git diff --quiet FETCH_HEAD -- f1_cache; then
+              echo "cache unchanged; nothing to publish"
+              exit 0
+            fi
+          fi
+          git commit -m "data: refresh OpenF1 cache ($(date -u +%Y-%m-%d), ${FILES} files)"
+          git push --force origin data-cache

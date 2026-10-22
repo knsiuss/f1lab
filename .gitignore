@@ -179,3 +179,13 @@ mydiff.txt
 computed_replay_data/
 # Dev guide stays local only
 CLAUDE.md
+
+# Static race pages produced by tools/export_static.py
+site/
+site_test/
+
+# AgentTeams scratch state (local only)
+.agent-teams/
+
+# local docker volume used by DEPLOYMENT.md
+/docker-cache/

@@ -1,0 +1,115 @@
+name: deploy
+
+# Two independent jobs:
+#   image  - build the Docker image, then prove it actually serves traffic
+#   site   - export one static HTML page per finished race and publish it
+#
+# The smoke test is the point: a container that builds but never answers
+# /_stcore/health is a broken deploy, and that is exactly the failure the old
+# Dockerfile hid (it asked for `curl`, which python:slim does not ship).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t f1lab:ci .
+
+      - name: Start the container
+        run: |
+          docker run -d --name f1lab -p 8501:8501 \
+            -e F1LAB_CACHE_DIR=/data/f1_cache \
+            f1lab:ci
+
+      - name: Wait for the health endpoint
+        run: |
+          for attempt in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8501/_stcore/health || true)
+            if [ "$code" = "200" ]; then
+              echo "healthy after ${attempt}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "the container never became healthy" >&2
+          docker logs f1lab >&2 || true
+          exit 1
+
+      - name: Smoke-test the app shell
+        run: |
+          curl -s http://127.0.0.1:8501/ | grep -q 'streamlit' \
+            || { echo 'the root page did not return the Streamlit shell' >&2; exit 1; }
+          echo 'root page serves the app shell'
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f f1lab || true
+
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Publish the image
+        if: github.ref == 'refs/heads/main'
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:latest"
+          docker tag f1lab:ci "$image"
+          docker push "$image"
+          echo "published $image" >> "$GITHUB_STEP_SUMMARY"
+
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # A season with no results yet makes the tool exit 2; that is not a
+      # deploy failure, so each year is allowed to fail and the last one wins.
+      - name: Export the static race pages
+        run: |
+          set -x
+          python tools/export_static.py --year 2026 --out site || true
+          python tools/export_static.py --year 2025 --out site || true
+          test -f site/index.html || { echo 'no site/index.html was written' >&2; exit 1; }
+          ls -la site | head -20
+
+      - name: Upload the static site
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-site
+          path: site
+          retention-days: 14
+
+      - name: Upload to Pages
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to Pages
+        if: github.ref == 'refs/heads/main'
+        uses: actions/deploy-pages@v4

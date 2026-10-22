@@ -64,6 +64,15 @@ models/*.joblib
 .azure/
 .vercel/
 
+# Testing (the image only needs src/)
+tests/
+tools/
+
+# Static export and deploy manifests (published by CI, not baked in)
+site/
+site_test/
+deploy/
+
 # Build artifacts
 build/
 dist/

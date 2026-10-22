@@ -1,35 +1,20 @@
-# Multi-stage build for F1 Analytics
-# Optimized for production deployment
+# F1 Lab -- container image
+#
+#   docker build -t f1lab .
+#   docker run --rm -p 8501:8501 -v f1lab-cache:/data/f1_cache f1lab
+#
+# The app is a Streamlit multi-page app (src/f1.py). Nothing here needs a
+# compiler: pandas, numpy, plotly, matplotlib, streamlit, fastf1 and requests
+# all publish wheels for python:3.12-slim, so the build stays small and fast.
 
-FROM python:3.11-slim as builder
+FROM python:3.12-slim
 
-# Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Set working directory
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Production stage
-FROM python:3.11-slim
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app/src \
+    F1LAB_CACHE_DIR=/data/f1_cache \
     STREAMLIT_SERVER_PORT=8501 \
     STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
     STREAMLIT_SERVER_HEADLESS=true \
@@ -37,25 +22,25 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Only what the app reads at runtime.
 COPY src/ ./src/
-COPY data/ ./data/
 COPY .streamlit/ ./.streamlit/
-COPY README.md .
+COPY README.md ./README.md
 
-# Create necessary directories
-RUN mkdir -p f1_cache logs models
+# The cache directory is the only state worth keeping between runs: it holds the
+# OpenF1 responses, so a restarted container does not re-download a whole season.
+# Mount a volume here in production (see DEPLOYMENT.md).
+RUN mkdir -p /data/f1_cache /app/logs && chown -R 10001:10001 /data /app
 
-# Expose Streamlit port
+USER 10001:10001
+
 EXPOSE 8501
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+# python:3.12-slim has no curl, so the probe uses the standard library.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
+    CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4).status == 200 else 1)"
 
-# Run the application
-CMD ["streamlit", "run", "src/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "src/f1.py", "--server.port=8501", "--server.address=0.0.0.0"]
