@@ -345,8 +345,8 @@ def show_plotly_chart(fig, width='stretch', apply_theme=True, **kwargs):
     if apply_theme:
         fig.update_layout(
             font=dict(family="Inter, system-ui, sans-serif", color="#E8EAF0"),
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='#12151C',
+            plot_bgcolor='#171B24',
             hoverlabel=dict(
                 bgcolor="rgba(18,21,28,0.95)",
                 font_size=12,

@@ -280,6 +280,12 @@ def test_the_panel_loads_no_library_and_pulls_only_the_two_tile_hosts():
     assert 'DATA.host' in text
 
 
+def test_the_panel_names_the_circuit_it_is_centred_on():
+    text = radar.TEMPLATE.read_text(encoding='utf-8')
+    assert 'id="place"' in text
+    assert 'DATA.track_name' in text
+
+
 def test_the_payload_is_inlined_with_the_script_block_escaped():
     payload = {'track_name': '</script><script>alert(1)</script>',
                'frames': [{'path': '/v2/radar/1', 'time': 1, 'label': '00:00'}],
@@ -294,3 +300,30 @@ def test_the_payload_is_inlined_with_the_script_block_escaped():
 def test_the_panel_height_lives_with_the_other_sizes():
     assert radar.HEIGHT == styles.RADAR_HEIGHT
     assert isinstance(radar.HEIGHT, int) and radar.HEIGHT > 300
+
+
+# ---------------------------------------------------------------------------
+# The page must centre the map on the race it is showing
+# ---------------------------------------------------------------------------
+
+def test_the_radar_follows_the_race_being_read():
+    """Reading one race's weather must not draw another circuit's rain.
+
+    The page used to prefer the next session's circuit, so every race showed
+    the same map (Austin, while the next session was there).
+    """
+    assert radar.scope_for('British Grand Prix', 'Austin') == 'British Grand Prix'
+    assert radar.scope_for('Japanese Grand Prix', 'Austin') == 'Japanese Grand Prix'
+
+
+def test_the_next_session_is_only_a_fallback_for_an_unknown_circuit():
+    assert radar.scope_for('Moon Grand Prix', 'Austin') == 'Austin'
+    assert radar.scope_for('Moon Grand Prix', None) is None
+    assert radar.scope_for(None, 'Austin') == 'Austin'
+    assert radar.scope_for(None, None) is None
+
+
+def test_the_page_asks_radar_for_the_scope_instead_of_picking_one_itself():
+    source = (ROOT / 'src' / 'pages' / '4_Report.py').read_text(encoding='utf-8')
+    assert 'radar.scope_for(track, forecast_place)' in source
+    assert 'forecast_place or track' not in source

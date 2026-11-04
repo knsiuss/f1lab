@@ -12,31 +12,33 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap');
 
 :root {
-    /* surfaces */
+    /* surfaces: deep charcoal base, cards and one elevated step.
+       Values follow the Head-to-Head redesign brief. */
     --f1-bg: #0B0D12;
+    --f1-sidebar: #12151C;
     --f1-surface: #12151C;
     --f1-surface-2: #171B24;
-    --f1-surface-3: #1D222D;
+    --f1-surface-3: #1F2733;
 
     /* lines */
-    --f1-border: rgba(255, 255, 255, 0.08);
-    --f1-border-strong: rgba(255, 255, 255, 0.14);
+    --f1-border: #292E39;
+    --f1-border-strong: #383F4C;
 
     /* text */
-    --f1-text: #E8EAF0;
-    --f1-text-muted: #9AA1AE;
-    --f1-text-dim: #6B7280;
+    --f1-text: #F4F5F7;
+    --f1-text-muted: #929BAA;
+    --f1-text-dim: #626D7D;
 
     /* accents */
     --f1-accent: #E10600;
     --f1-accent-soft: rgba(225, 6, 0, 0.14);
     --f1-gold: #FFD166;
-    --f1-green: #3ECF8E;
-    --f1-blue: #4C8DFF;
-    --f1-amber: #FFB020;
+    --f1-green: #00D2BE;
+    --f1-blue: #4388E8;
+    --f1-amber: #FF8700;
 
     /* geometry */
-    --f1-radius: 12px;
+    --f1-radius: 14px;
     --f1-radius-sm: 8px;
     --f1-gap: 1rem;
     --f1-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.28);
@@ -48,6 +50,13 @@
 
 html, body, [class*="css"], .stApp, [data-testid="stAppViewContainer"] {
     background-color: var(--f1-bg);
+    /* Quiet charcoal: two barely-there radial washes (red top-right,
+       blue bottom-left) so the page reads as one surface and the data
+       carries the attention. No patterns, no illustrations. */
+    background-image:
+        radial-gradient(55% 38% at 96% -6%, rgba(225, 6, 0, 0.07), transparent 62%),
+        radial-gradient(45% 32% at -4% 104%, rgba(67, 136, 232, 0.05), transparent 65%);
+    background-attachment: fixed;
     color: var(--f1-text);
     font-family: 'Inter', system-ui, sans-serif !important;
     font-size: 14px;
@@ -62,27 +71,56 @@ h1, h2, h3, h4, h5, h6 {
 a { color: var(--f1-blue); }
 
 /* Streamlit chrome that only adds noise. The header itself is kept: it
-   carries the sidebar collapse control, which is the app's own hamburger. */
+   carries the sidebar collapse control, which is the app's own hamburger.
+   The toolbar is NOT hidden: in this Streamlit version the sidebar's
+   expand button (the only way back after collapsing) lives inside it,
+   so hiding the toolbar stranded the sidebar shut. */
 #MainMenu, footer,
-[data-testid="stToolbar"], .stDeployButton, [data-testid="stAppDeployButton"],
+.stDeployButton, [data-testid="stAppDeployButton"],
 [data-testid="stStatusWidget"], [data-testid="stChatActionButtonIcon"],
 [data-testid="stBottomBlockContainer"] {
     display: none !important;
 }
 
+[data-testid="stToolbar"] {
+    background: transparent;
+    box-shadow: none;
+}
+
+/* The expand button looks like the brand-row hamburger, and stays above
+   the checkered page background so it is always clickable. */
+[data-testid="stExpandSidebarButton"] {
+    background-color: var(--f1-surface-2);
+    border: 1px solid var(--f1-border-strong);
+    border-radius: var(--f1-radius-sm);
+    color: var(--f1-text);
+    margin: 0.5rem 0 0 0.75rem;
+    min-width: 2.4rem;
+    min-height: 2.1rem;
+    z-index: 1000001;
+}
+
+[data-testid="stExpandSidebarButton"]:hover {
+    border-color: var(--f1-accent);
+    color: #fff;
+}
+
 [data-testid="stHeader"] {
     background: transparent;
     height: 2.6rem;
+    pointer-events: none;
 }
 
-[data-testid="stHeader"] [data-testid="stToolbar"] {
-    display: none !important;
+[data-testid="stHeader"] [data-testid="stExpandSidebarButton"] {
+    pointer-events: auto;
 }
 
 .block-container {
     padding-top: 2.2rem;
     padding-bottom: 3rem;
-    max-width: 1480px;
+    padding-left: 2rem;
+    padding-right: 2rem;
+    max-width: 1440px;
 }
 
 /* --------------------------------------------------------------------------
@@ -117,10 +155,17 @@ a { color: var(--f1-blue); }
 }
 
 .f1-section {
+    margin: 1.8rem 0 0.85rem;
+}
+
+/* The title and its right-hand note share one baseline row; the plain-
+   language hint is a block of its own underneath, never squeezed beside
+   them (a flex item's max-width used to let it fit on the title row). */
+.f1-section-row {
     display: flex;
     align-items: baseline;
     gap: 0.6rem;
-    margin: 1.8rem 0 0.85rem;
+    flex-wrap: wrap;
 }
 
 .f1-section-title {
@@ -199,8 +244,14 @@ a { color: var(--f1-blue); }
     background: var(--f1-surface);
     border: 1px solid var(--f1-border);
     border-radius: var(--f1-radius);
-    padding: 1rem 1.1rem;
+    padding: 1.25rem 1.4rem;
     box-shadow: var(--f1-shadow);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.f1-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--f1-border-strong);
 }
 
 .f1-card--flat {
@@ -219,12 +270,44 @@ a { color: var(--f1-blue); }
     border: 1px solid var(--f1-border);
     border-left: 3px solid var(--f1-border-strong);
     border-radius: var(--f1-radius-sm);
-    padding: 0.85rem 0.95rem;
-    min-height: 84px;
+    padding: 1rem 1.1rem;
+    min-height: 96px;
     display: flex;
     flex-direction: column;
     justify-content: center;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
+
+.f1-kpi:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--f1-shadow);
+    border-color: var(--f1-border-strong);
+}
+
+/* Restrained KPI icon: a small line glyph above the label, tinted by tone. */
+.f1-kpi-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    margin-bottom: 0.5rem;
+    border-radius: 999px;
+    background: var(--f1-surface-2);
+    border: 1px solid var(--f1-border);
+    color: var(--f1-text-muted);
+}
+
+.f1-kpi-icon svg {
+    width: 14px;
+    height: 14px;
+    display: block;
+}
+
+.f1-kpi--accent .f1-kpi-icon { color: #FF8A85; border-color: rgba(225, 6, 0, 0.35); }
+.f1-kpi--good .f1-kpi-icon { color: var(--f1-green); border-color: rgba(0, 210, 190, 0.3); }
+.f1-kpi--warn .f1-kpi-icon { color: var(--f1-amber); }
+.f1-kpi--info .f1-kpi-icon { color: var(--f1-blue); }
 
 .f1-kpi--accent { border-left-color: var(--f1-accent); }
 .f1-kpi--good   { border-left-color: var(--f1-green); }
@@ -257,6 +340,276 @@ a { color: var(--f1-blue); }
 .f1-kpi--accent .f1-kpi-value { color: #FF6B66; }
 .f1-kpi--good   .f1-kpi-value { color: var(--f1-green); }
 .f1-kpi--warn   .f1-kpi-value { color: var(--f1-amber); }
+
+/* Predicted winner card (Predictor): the dominant card of the forecast tab. */
+.f1-winner {
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    background: var(--f1-surface);
+    border: 1px solid var(--f1-border);
+    border-left: 4px solid var(--f1-accent);
+    border-radius: var(--f1-radius);
+    padding: 1.1rem 1.25rem;
+    margin-bottom: 0.9rem;
+}
+
+.f1-winner-avatar {
+    flex: 0 0 3.6rem;
+    width: 3.6rem;
+    height: 3.6rem;
+    border-radius: 50%;
+    border: 2px solid var(--f1-accent);
+    background: var(--f1-surface-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--f1-text);
+}
+
+.f1-winner-body { flex: 1; min-width: 0; }
+
+.f1-winner-eyebrow {
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--f1-text-dim);
+}
+
+.f1-winner-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.15;
+    color: var(--f1-text);
+    margin-top: 0.2rem;
+}
+
+.f1-winner-sub {
+    font-size: 0.82rem;
+    color: var(--f1-text-muted);
+    margin-top: 0.25rem;
+}
+
+.f1-winner-prob {
+    text-align: right;
+    flex: 0 0 auto;
+}
+
+.f1-winner-prob-value {
+    font-family: 'Outfit', sans-serif;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #FF6B66;
+}
+
+.f1-winner-prob-label {
+    font-size: 0.72rem;
+    color: var(--f1-text-muted);
+    margin-top: 0.15rem;
+}
+
+.f1-winner-bar {
+    height: 6px;
+    width: 9rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    margin-top: 0.5rem;
+}
+
+.f1-winner-bar > span {
+    display: block;
+    height: 100%;
+    background: var(--f1-accent);
+}
+
+/* Predicted podium cards (Predictor): three cards, P1 emphasized. */
+.f1-podium-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.f1-podium-card {
+    background: var(--f1-surface);
+    border: 1px solid var(--f1-border);
+    border-radius: var(--f1-radius);
+    padding: 1.1rem 1rem 1rem;
+    text-align: center;
+    min-height: 190px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.f1-podium-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--f1-border-strong);
+}
+
+.f1-podium-card--p1 {
+    border-color: rgba(225, 6, 0, 0.55);
+    box-shadow: 0 8px 28px rgba(225, 6, 0, 0.14);
+}
+
+.f1-podium-pos {
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--f1-text-dim);
+    margin-bottom: 0.7rem;
+}
+
+.f1-podium-card--p1 .f1-podium-pos { color: #FF8A85; }
+
+.f1-podium-avatar {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 50%;
+    border: 2px solid var(--f1-border-strong);
+    background: var(--f1-surface-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Outfit', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--f1-text);
+    margin-bottom: 0.6rem;
+}
+
+.f1-podium-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--f1-text);
+}
+
+.f1-podium-team {
+    font-size: 0.78rem;
+    color: var(--f1-text-muted);
+    margin-top: 0.1rem;
+}
+
+.f1-podium-win {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--f1-text);
+    margin-top: 0.6rem;
+    line-height: 1.1;
+}
+
+.f1-podium-winlabel {
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--f1-text-dim);
+}
+
+.f1-podium-pts {
+    font-size: 0.78rem;
+    color: var(--f1-text-muted);
+    margin-top: 0.35rem;
+}
+
+/* Driver portraits and country flags (local assets, data-URI embedded). */
+.f1-portrait {
+    width: 3.4rem;
+    height: 3.4rem;
+    border-radius: 50%;
+    overflow: hidden;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--f1-surface-2);
+    border: 2px solid var(--f1-border-strong);
+}
+
+.f1-portrait img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.f1-portrait--initials {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--f1-text);
+}
+
+.f1-flag {
+    display: inline-flex;
+    width: 1.6rem;
+    height: 1.05rem;
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--f1-border);
+    vertical-align: -0.2em;
+}
+
+.f1-flag img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Race context card (flag + name + country + round + date + status). */
+.f1-racecard {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+}
+
+.f1-racecard .f1-flag {
+    width: 2.6rem;
+    height: 1.7rem;
+    border-radius: 5px;
+}
+
+.f1-racecard-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--f1-text);
+}
+
+.f1-racecard-meta {
+    font-size: 0.78rem;
+    color: var(--f1-text-muted);
+    margin-top: 0.1rem;
+}
+
+.f1-racecard-status {
+    margin-left: auto;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.25rem 0.65rem;
+    border-radius: 999px;
+    border: 1px solid var(--f1-border);
+    color: var(--f1-text-muted);
+}
+
+.f1-racecard-status--live {
+    color: #FF8A85;
+    border-color: rgba(225, 6, 0, 0.45);
+    background: var(--f1-accent-soft);
+}
 
 /* --------------------------------------------------------------------------
    Result rows (podium / classification)
@@ -392,10 +745,79 @@ a { color: var(--f1-blue); }
     display: none !important;
 }
 
+/* A fixed, readable width: the default Streamlit width lets long labels
+   ("Head-to-Head & Season") wrap and makes the controls below it change
+   width between pages. Only the expanded state is sized, so collapsing
+   still slides the sidebar fully off screen. */
+[data-testid="stSidebar"][aria-expanded="true"] {
+    min-width: 260px;
+    max-width: 260px;
+}
+
+[data-testid="stSidebar"][aria-expanded="true"] > div:first-child {
+    width: 260px;
+    min-width: 260px;
+    max-width: 260px;
+}
+
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+    gap: 0.3rem;
+}
+
+/* The menu rows sit rapat di atas: no extra margin on each page-link
+   block, so the list reads as one compact group under the brand instead
+   of rows hanging in space. */
+[data-testid="stSidebar"] [data-testid="stPageLink"] {
+    margin: 0.1rem 0 0 !important;
+}
+
+/* Section headings inside the sidebar ("Menu"). The Season and language
+   controls keep their own widget labels, styled to match below. */
+.f1-side-label {
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--f1-text-dim);
+    margin: 0.25rem 0.15rem 0.5rem;
+}
+
+/* Brand row: the wordmark sits on the same baseline as the hamburger, so
+   the two read as one row instead of a button floating above the text.
+   No logo mark -- the name alone carries the brand. */
+.f1-brand {
+    display: flex;
+    align-items: center;
+    min-height: 38px;
+}
+
+.f1-brand-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.f1-brand-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.18rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--f1-text);
+    letter-spacing: 0.07em;
+}
+
+.f1-brand-sub {
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--f1-text-dim);
+    letter-spacing: 0.17em;
+    text-transform: uppercase;
+}
+
 .f1-sidebar-rule {
     height: 1px;
     background: var(--f1-border);
-    margin: 0.6rem 0 0.9rem;
+    margin: 0.45rem 0 0.3rem;
 }
 
 /* The hamburger: a real button (so it is keyboard reachable and announced),
@@ -403,18 +825,19 @@ a { color: var(--f1-blue); }
 .st-key-nav_toggle button {
     width: 38px;
     min-width: 38px;
-    height: 34px;
+    height: 38px;
     padding: 0;
     font-size: 0;
     color: transparent;
-    border-radius: var(--f1-radius-sm);
+    border: 1px solid var(--f1-border);
+    border-radius: 10px;
     background-color: var(--f1-surface-2);
     background-image:
         linear-gradient(var(--f1-text) 0 0),
         linear-gradient(var(--f1-text) 0 0),
         linear-gradient(var(--f1-text) 0 0);
-    background-size: 18px 2px;
-    background-position: center 9px, center 16px, center 23px;
+    background-size: 17px 2px;
+    background-position: center 12px, center 18px, center 24px;
     background-repeat: no-repeat;
     transition: border-color 0.15s ease, background-color 0.15s ease;
 }
@@ -424,19 +847,298 @@ a { color: var(--f1-blue); }
     background-color: var(--f1-surface-3);
 }
 
-/* The page menu the hamburger opens. */
+.st-key-nav_toggle button:focus-visible {
+    outline: 2px solid var(--f1-blue);
+    outline-offset: 2px;
+}
+
+/* The page menu the hamburger opens. Every row is the same height with the
+   icon and label on one baseline, so the list scans as a list. */
 [data-testid="stSidebar"] [data-testid="stPageLink"] a,
 [data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"] {
-    border-radius: var(--f1-radius-sm);
-    padding: 0.35rem 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-height: 42px;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid transparent;
+    border-radius: 10px;
     color: var(--f1-text-muted);
-    font-size: 0.88rem;
-    transition: background 0.15s ease, color 0.15s ease;
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 [data-testid="stSidebar"] [data-testid="stPageLink"] a:hover,
 [data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"]:hover {
     background: var(--f1-surface-2);
+    border-color: var(--f1-border);
+    color: var(--f1-text);
+}
+
+[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"]:focus-visible {
+    outline: 2px solid var(--f1-blue);
+    outline-offset: 1px;
+}
+
+[data-testid="stSidebar"] [data-testid="stPageLink-icon"],
+[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"] svg {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    opacity: 0.85;
+}
+
+/* The page the reader is on: a filled row with the F1 red accent on its
+   left edge, instead of Streamlit's default grey wash that looked like a
+   hover on a different row. This Streamlit version marks the current
+   page's link with a generated class (st-emotion-cache-r8e30d, verified
+   in the DOM: it is the only marker -- there is no aria-current, and the
+   default page's link always carries href="", so href cannot tell the
+   current page apart). The accent is an inset shadow, which renders on
+   the link itself with no pseudo-element. If Streamlit is upgraded and
+   the hash changes, aria-current (matched too) is the fallback to check. */
+[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"][aria-current="page"],
+[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"].st-emotion-cache-r8e30d {
+    background: linear-gradient(90deg, rgba(225, 6, 0, 0.30) 0%, rgba(225, 6, 0, 0.10) 100%);
+    border-color: rgba(225, 6, 0, 0.55);
+    box-shadow: inset 3px 0 0 var(--f1-accent);
+    color: #fff;
+    font-weight: 600;
+}
+
+[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"][aria-current="page"] svg,
+[data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"].st-emotion-cache-r8e30d svg {
+    opacity: 1;
+    color: #FF8A85;
+}
+
+/* Sidebar controls (Season, Explainer language): the widget labels become
+   the same small headings as the menu, and every control is one height. */
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"],
+[data-testid="stSidebar"] .stSelectbox label {
+    font-size: 0.66rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.13em !important;
+    text-transform: uppercase !important;
+    color: var(--f1-text-dim) !important;
+}
+
+[data-testid="stSidebar"] [data-baseweb="select"] > div {
+    min-height: 42px;
+    border-radius: 10px !important;
+    background: var(--f1-surface-2) !important;
+    border: 1px solid var(--f1-border) !important;
+    transition: border-color 0.15s ease;
+}
+
+[data-testid="stSidebar"] [data-baseweb="select"] > div:hover {
+    border-color: var(--f1-border-strong) !important;
+}
+
+/* Current Streamlit renders selectboxes with React Aria, not BaseWeb: the
+   visible pill is the combobox group (input + chevron button together)
+   inside .stSelectbox. Style the group as one box so the chevron stays
+   inside it instead of hanging outside the input. */
+[data-testid="stSidebar"] .stSelectbox [role="group"] {
+    min-height: 42px;
+    border-radius: 10px;
+    background: var(--f1-surface-2);
+    border: 1px solid var(--f1-border);
+    transition: border-color 0.15s ease;
+}
+
+[data-testid="stSidebar"] .stSelectbox [role="group"]:hover {
+    border-color: var(--f1-border-strong);
+}
+
+[data-testid="stSidebar"] .stSelectbox input {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: var(--f1-text) !important;
+}
+
+/* The "New to F1?" popover button: Streamlit's default is a purple button
+   that matches nothing else in the app. Restyle it like the other controls.
+   The button is a descendant of the popover (stPopover > div > button),
+   not a direct child, and its purple comes from Streamlit's generated
+   styles, hence the !important. */
+[data-testid="stSidebar"] [data-testid="stPopover"] button,
+[data-testid="stSidebar"] [data-testid="stPopoverButton"] {
+    width: 100%;
+    min-height: 42px;
+    border-radius: 10px;
+    border: 1px solid var(--f1-border-strong) !important;
+    background: var(--f1-surface-2) !important;
+    background-color: var(--f1-surface-2) !important;
+    color: var(--f1-text);
+    font-weight: 600;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+[data-testid="stSidebar"] [data-testid="stPopover"] button:hover,
+[data-testid="stSidebar"] [data-testid="stPopoverButton"]:hover {
+    border-color: var(--f1-accent) !important;
+    background: var(--f1-surface-3) !important;
+    background-color: var(--f1-surface-3) !important;
+    color: #fff;
+}
+
+/* The season summary card under the Season picker. */
+.f1-side-stats {
+    border: 1px solid var(--f1-border);
+    border-radius: var(--f1-radius);
+    background: var(--f1-surface-2);
+    padding: 0.85rem 0.9rem;
+    margin-top: 0.15rem;
+}
+
+.f1-side-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+}
+
+.f1-side-stat + .f1-side-stat {
+    margin-top: 0.55rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid var(--f1-border);
+}
+
+.f1-side-stat-label {
+    font-size: 0.78rem;
+    color: var(--f1-text-muted);
+}
+
+.f1-side-stat-value {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: var(--f1-text);
+    white-space: nowrap;
+}
+
+.f1-side-progress {
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    margin-top: 0.7rem;
+    overflow: hidden;
+}
+
+.f1-side-progress-bar {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--f1-accent) 0%, #FF6B66 100%);
+}
+
+/* Championship progress (Head-to-Head hero): a labelled solid bar. */
+.f1-progress {
+    margin-top: 0.85rem;
+}
+.f1-progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.74rem;
+    color: var(--f1-text-muted);
+    margin-bottom: 0.4rem;
+}
+.f1-progress-track {
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+.f1-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--f1-accent) 0%, #FF6B66 100%);
+}
+
+/* Mini bar inside a table cell (teammate matrix): share of the pair. */
+.f1-cell-bar {
+    display: block;
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.09);
+    margin-top: 0.35rem;
+    min-width: 64px;
+    overflow: hidden;
+}
+.f1-cell-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+}
+
+/* Insight cards (Head-to-Head): one derived finding per card. */
+.f1-insight {
+    border: 1px solid var(--f1-border);
+    border-radius: var(--f1-radius);
+    background: var(--f1-surface);
+    padding: 0.85rem 1rem;
+    min-height: 96px;
+}
+.f1-insight-title {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--f1-text-dim);
+}
+.f1-insight-value {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: var(--f1-text);
+    margin-top: 0.3rem;
+    line-height: 1.15;
+}
+.f1-insight-sub {
+    font-size: 0.78rem;
+    color: var(--f1-text-muted);
+    margin-top: 0.2rem;
+}
+
+/* The data-source footer at the bottom of the sidebar. */
+.f1-side-foot {
+    font-size: 0.7rem;
+    color: var(--f1-text-dim);
+    line-height: 1.55;
+    border-top: 1px solid var(--f1-border);
+    padding-top: 0.85rem;
+    margin-top: 0.4rem;
+}
+
+.f1-side-foot a {
+    color: var(--f1-text-muted);
+}
+
+.f1-side-credit {
+    margin-top: 0.55rem;
+    color: var(--f1-text-muted);
+}
+
+.f1-side-credit strong {
+    color: var(--f1-text);
+}
+
+/* The collapse control (the "«" at the top right of the sidebar) gets the
+   same treatment as the hamburger so the two ends of the bar match. */
+[data-testid="stSidebarCollapseButton"] {
+    background-color: var(--f1-surface-2);
+    border: 1px solid var(--f1-border);
+    border-radius: var(--f1-radius-sm);
+    color: var(--f1-text-muted);
+    min-width: 2rem;
+    min-height: 2rem;
+}
+
+[data-testid="stSidebarCollapseButton"]:hover {
+    border-color: var(--f1-accent);
     color: var(--f1-text);
 }
 
@@ -452,9 +1154,13 @@ a { color: var(--f1-blue); }
 /* The band at the top of a dashboard -------------------------------------- */
 
 .f1-hero {
+    position: relative;
+    overflow: hidden;
+    /* Dark hero with a restrained red glow low on the right. */
     background:
-        radial-gradient(120% 140% at 100% 0%, rgba(225, 6, 0, 0.16) 0%, rgba(225, 6, 0, 0) 55%),
-        linear-gradient(180deg, var(--f1-surface-2) 0%, var(--f1-surface) 100%);
+        radial-gradient(75% 95% at 100% 115%, rgba(225, 6, 0, 0.22) 0%, rgba(225, 6, 0, 0.06) 42%, transparent 65%),
+        radial-gradient(45% 55% at 88% -25%, rgba(255, 255, 255, 0.05) 0%, transparent 60%),
+        linear-gradient(115deg, var(--f1-surface-2) 0%, var(--f1-surface) 58%, #0C0E13 100%);
     border: 1px solid var(--f1-border);
     border-radius: var(--f1-radius);
     padding: 1.4rem 1.5rem 1.25rem;
@@ -531,12 +1237,7 @@ a { color: var(--f1-blue); }
 
 /* The plain-language line under a section title --------------------------- */
 
-.f1-section {
-    flex-wrap: wrap;
-}
-
 .f1-section-hint {
-    flex-basis: 100%;
     font-size: 0.84rem;
     line-height: 1.5;
     color: var(--f1-text-muted);
@@ -641,6 +1342,12 @@ a { color: var(--f1-blue); }
     font-size: 0.84rem;
 }
 
+/* Narrow tables (few short columns): hug the content instead of spreading
+   to the full width, which would leave a void beside right-aligned values. */
+.f1-table--compact {
+    width: auto;
+}
+
 .f1-table thead th {
     text-align: left;
     font-size: 0.66rem;
@@ -652,6 +1359,10 @@ a { color: var(--f1-blue); }
     background: var(--f1-surface-2);
     border-bottom: 1px solid var(--f1-border);
     white-space: nowrap;
+    /* Sticky header: the wrap scrolls, the column titles stay put. */
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 
 .f1-table tbody td,
@@ -673,9 +1384,14 @@ a { color: var(--f1-blue); }
     border-bottom: none;
 }
 
+.f1-table tbody tr:nth-child(even) td,
+.f1-table tbody tr:nth-child(even) th {
+    background: rgba(255, 255, 255, 0.02);
+}
+
 .f1-table tbody tr:hover td,
 .f1-table tbody tr:hover th {
-    background: rgba(255, 255, 255, 0.025);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .f1-table-label {
@@ -820,8 +1536,10 @@ a { color: var(--f1-blue); }
    -------------------------------------------------------------------------- */
 
 [data-testid="stSidebar"] {
-    background: var(--f1-surface);
+    background: var(--f1-sidebar);
     border-right: 1px solid var(--f1-border);
+    min-width: 260px;
+    max-width: 260px;
 }
 
 [data-testid="stSidebar"] h1 {
@@ -902,8 +1620,191 @@ hr {
     border-top: 1px solid var(--f1-border);
 }
 
-/* Plotly charts sit on the page background, not on a card */
+/* Plotly charts sit on a solid card, not on the page wash. The canvas
+   background itself is solid (styles.BG_PAPER); this gives it a border. */
 .js-plotly-plot .plotly .modebar { display: none !important; }
+.stPlotlyChart, [data-testid="stPlotlyChart"] {
+    background-color: var(--f1-surface);
+    border: 1px solid var(--f1-border);
+    border-radius: var(--f1-radius);
+    padding: 0.55rem 0.55rem 0.25rem;
+    box-shadow: var(--f1-shadow);
+}
+
+/* Solid surfaces, matching the dark reference: panels keep their own
+   solid backgrounds from the component rules above. */
+.f1-side-stats {
+    background-color: var(--f1-surface);
+}
+
+/* Tabs read as solid pills on the checkered board. */
+.stTabs [data-baseweb="tab-list"] {
+    background: var(--f1-surface);
+    border: 1px solid var(--f1-border);
+    border-radius: 999px;
+    padding: 0.3rem 0.4rem;
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 999px;
+    background: transparent;
+}
+.stTabs [data-baseweb="tab"]:hover { background: var(--f1-surface-2); }
+.stTabs [aria-selected="true"] {
+    background: var(--f1-accent);
+    color: #fff !important;
+}
+
+/* Main-area controls: solid, never see-through. */
+.block-container [data-baseweb="select"] > div,
+.block-container [data-baseweb="input"] > div,
+.block-container .stSelectbox [role="group"],
+.block-container .stMultiSelect [role="group"] {
+    background-color: var(--f1-surface-2) !important;
+    border: 1px solid var(--f1-border-strong) !important;
+    border-radius: var(--f1-radius-sm) !important;
+}
+
+/* Duel header (Head-to-Head): two livery tiles around a VS badge. */
+.f1-duel {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: stretch;
+    gap: 0.75rem;
+    margin: 0.4rem 0 0.9rem;
+}
+.f1-duel-tile {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--f1-border);
+    border-radius: var(--f1-radius);
+    background-color: var(--f1-surface-2);
+    padding: 1rem 1.1rem;
+    min-height: 118px;
+}
+.f1-duel-tile::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 6px;
+    background: var(--f1-duel-colour, var(--f1-accent));
+}
+.f1-duel-tile--b::before { inset: 0 0 0 auto; }
+.f1-duel-tile--b { text-align: right; }
+.f1-duel-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--f1-text);
+}
+.f1-duel-team { font-size: 0.8rem; color: var(--f1-text-muted); margin-top: 0.2rem; }
+.f1-duel-big {
+    font-family: 'Outfit', sans-serif;
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1.1;
+    margin-top: 0.55rem;
+    color: var(--f1-text);
+}
+.f1-duel-sub { font-size: 0.76rem; color: var(--f1-text-muted); }
+.f1-duel-vs {
+    align-self: center;
+    width: 3.4rem;
+    height: 3.4rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Outfit', sans-serif;
+    font-weight: 700;
+    font-size: 1rem;
+    color: #fff;
+    background: radial-gradient(120% 120% at 30% 20%, #FF2A20 0%, var(--f1-accent) 70%);
+    border: 2px solid rgba(255, 255, 255, 0.55);
+    box-shadow: var(--f1-shadow);
+}
+
+/* Driver initials avatar: the profile mark when no portrait is available. */
+.f1-duel-avatar {
+    width: 2.6rem;
+    height: 2.6rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--f1-text);
+    background: color-mix(in srgb, var(--f1-duel-colour, var(--f1-accent)) 22%, transparent);
+    border: 1px solid var(--f1-duel-colour, var(--f1-accent));
+    margin-bottom: 0.55rem;
+}
+.f1-duel-tile--b .f1-duel-avatar { margin-left: auto; }
+
+/* Key takeaways: derived insights, one row per finding. */
+.f1-takeaways {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    background: var(--f1-surface);
+    border: 1px solid var(--f1-border);
+    border-radius: var(--f1-radius);
+    padding: 1rem 1.1rem;
+    height: 100%;
+}
+.f1-takeaway {
+    border-left: 3px solid var(--f1-accent);
+    padding-left: 0.75rem;
+}
+.f1-takeaway-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--f1-text);
+}
+.f1-takeaway-text {
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--f1-text-muted);
+    margin-top: 0.15rem;
+}
+
+/* Visual scoreboard rows: mirrored bars growing from the centre label, so
+   the longer bar always belongs to the driver ahead in that row. */
+.f1-score-bar {
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    display: flex;
+}
+.f1-score-bar > span { display: block; height: 100%; }
+.f1-score-bar--a > span { background: var(--f1-duel-a, #4285F4); }
+.f1-score-bar--b > span { background: var(--f1-duel-b, #FFB020); }
+.f1-score-mirror {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+    padding: 0 0.9rem 0.6rem;
+}
+.f1-score-half {
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    display: flex;
+}
+.f1-score-half > span { display: block; height: 100%; }
+.f1-score-half--a { justify-content: flex-end; }
+.f1-score-half--a > span { background: var(--f1-duel-a, #4285F4); }
+.f1-score-half--b { justify-content: flex-start; }
+.f1-score-half--b > span { background: var(--f1-duel-b, #FFB020); }
+@media (max-width: 720px) {
+    .f1-duel { grid-template-columns: 1fr; }
+    .f1-duel-vs { margin: 0 auto; }
+}
 
 /* =========================================================================
    Small screens (phones in portrait, ~360-430 px wide)

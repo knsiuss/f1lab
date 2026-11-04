@@ -319,3 +319,112 @@ def test_rain_outlook_returns_none_without_a_probability(monkeypatch):
     assert wx.rain_outlook('Monza', '2026-10-24T12:00:00Z') is None
     monkeypatch.setattr(wx, 'forecast', lambda *a, **k: _fake_forecast(probability=None))
     assert wx.rain_outlook('Monza', '2026-10-24T12:00:00Z') is None
+
+
+# --- the next two hours, in 15-minute steps ----------------------------------
+
+def _minutely(start, count, amounts=None, chances=None):
+    """A synthetic Open-Meteo document with a 15-minute block."""
+    amounts = amounts if amounts is not None else [0.0] * count
+    chances = chances if chances is not None else [0] * count
+    times = [(start + timedelta(minutes=15 * index)).strftime('%Y-%m-%dT%H:%M')
+             for index in range(count)]
+    return {
+        'latitude': 1.291,
+        'longitude': 103.864,
+        # The day payload is only accepted while it carries the hourly block
+        # the forecast reads, so the fake carries one too.
+        'hourly': {'time': []},
+        'minutely_15': {
+            'time': times,
+            'precipitation': list(amounts),
+            'precipitation_probability': list(chances),
+        },
+    }
+
+
+def test_timeline_keeps_only_the_window_ahead():
+    payload = _minutely(BASE - timedelta(minutes=30), 16)
+    out = wx.parse_timeline(payload, now=BASE)
+    assert out is not None
+    assert len(out['steps']) == 9                  # 0 .. 120 minutes, no past
+    assert out['steps'][0]['minutes_ahead'] == 0
+    assert out['steps'][-1]['minutes_ahead'] == 120
+    assert out['window_minutes'] == wx.TIMELINE_MINUTES
+    assert out['step_minutes'] == wx.TIMELINE_STEP_MIN
+    assert out['estimated'] is True
+
+
+def test_timeline_keeps_a_gap_as_none_instead_of_zero():
+    payload = _minutely(BASE, 8,
+                        amounts=[0.0, None, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        chances=[10, None, 80, 20, 5, 0, 0, 0])
+    out = wx.parse_timeline(payload, now=BASE)
+    gap = out['steps'][1]
+    assert gap['precipitation_mm'] is None
+    assert gap['probability'] is None
+    # The summary is built from the values that were published, not from zeros.
+    assert out['peak_probability'] == 80
+    assert out['peak_mm'] == pytest.approx(1.5)
+    assert out['total_mm'] == pytest.approx(1.5)
+    assert out['first_rain_min'] == 30
+
+
+def test_timeline_reports_no_rain_rather_than_a_missing_answer():
+    out = wx.parse_timeline(_minutely(BASE, 8), now=BASE)
+    assert out['first_rain_min'] is None
+    assert out['total_mm'] == 0.0
+    assert out['peak_probability'] == 0
+
+
+@pytest.mark.parametrize('payload', [
+    None,
+    {},
+    {'hourly': {'time': ['2026-10-11T11:00']}},
+    {'minutely_15': {'time': []}},
+    {'minutely_15': 'not a block'},
+])
+def test_timeline_is_none_on_an_unusable_payload(payload):
+    assert wx.parse_timeline(payload, now=BASE) is None
+
+
+def test_timeline_is_none_when_every_step_is_outside_the_window():
+    payload = _minutely(BASE + timedelta(hours=6), 4)
+    assert wx.parse_timeline(payload, now=BASE) is None
+
+
+def test_rain_timeline_asks_the_one_request_for_the_circuit(monkeypatch):
+    wx.clear_forecast_cache()
+    seen = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return _minutely(BASE, 8, chances=[5, 10, 30, 60, 60, 20, 10, 5])
+
+    def fake_get(url, params=None, timeout=None):
+        seen['url'] = url
+        seen['params'] = dict(params or {})
+        return FakeResponse()
+
+    monkeypatch.setattr(wx.requests, 'get', fake_get)
+    out = wx.rain_timeline('Marina Bay', now=BASE)
+    assert out is not None
+    assert out['track_name'] == 'Marina Bay'
+    assert out['latitude'] == pytest.approx(wx.coords_for('Marina Bay')[0])
+    assert seen['url'] == wx.OPEN_METEO_URL
+    # The timeline rides on the same document as the hourly forecast.
+    assert seen['params']['minutely_15'] == wx.OPEN_METEO_MINUTELY
+    assert seen['params']['hourly'] == wx.OPEN_METEO_HOURLY
+    assert out['peak_probability'] == 60
+    wx.clear_forecast_cache()
+
+
+def test_rain_timeline_does_not_ask_for_an_unknown_circuit(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError('the network must not be asked')
+
+    monkeypatch.setattr(wx.requests, 'get', boom)
+    assert wx.rain_timeline('Atlantis Grand Prix', now=BASE) is None

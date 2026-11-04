@@ -146,6 +146,20 @@ TEAM_COLORS: Dict[str, str] = {
     'Haas F1 Team': '#E6002B',
 }
 
+# Country name (calendar spelling) -> ISO 3166-1 alpha-2, for the flag
+# images in ``assets/flags/`` (flagcdn source, see ATTRIBUTION.md).
+FLAG_CODES: Dict[str, str] = {
+    'Australia': 'au', 'China': 'cn', 'Japan': 'jp', 'United States': 'us',
+    'USA': 'us', 'Canada': 'ca', 'Monaco': 'mc', 'Spain': 'es',
+    'Austria': 'at', 'Great Britain': 'gb', 'United Kingdom': 'gb',
+    'Belgium': 'be', 'Hungary': 'hu', 'Netherlands': 'nl', 'Italy': 'it',
+    'Azerbaijan': 'az', 'Bahrain': 'bh', 'Singapore': 'sg', 'Mexico': 'mx',
+    'Brazil': 'br', 'Qatar': 'qa', 'UAE': 'ae', 'United Arab Emirates': 'ae',
+    'Indonesia': 'id', 'Germany': 'de', 'France': 'fr', 'India': 'in',
+    'South Korea': 'kr', 'South Africa': 'za', 'Portugal': 'pt',
+    'Malaysia': 'my', 'Vietnam': 'vn', 'Saudi Arabia': 'sa',
+}
+
 # DRIVER PROFILES (2025 F1 Season)
 
 # Driver Profile Dictionary with Biographies

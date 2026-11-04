@@ -36,7 +36,12 @@ logger = logging.getLogger(__name__)
 ESTIMATED = 'estimated'
 
 OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast'
-OPEN_METEO_HOURLY = 'temperature_2m,precipitation_probability,wind_speed_10m,rain'
+OPEN_METEO_HOURLY = 'temperature_2m,precipitation_probability,wind_speed_10m,rain,weather_code'
+# The same request carries the 15-minute series, so the timeline costs no extra
+# network call: Open-Meteo answers one document for one coordinate and day.
+OPEN_METEO_MINUTELY = 'precipitation,precipitation_probability'
+TIMELINE_MINUTES = 120          # the panel looks two hours ahead
+TIMELINE_STEP_MIN = 15
 FORECAST_TIMEOUT_S = 6
 FORECAST_ATTEMPTS = 1
 FORECAST_NEAREST_HOURS = 3
@@ -48,6 +53,91 @@ RAIN_BANDS: Tuple[Tuple[str, float, float], ...] = (
     ('possible', 20.0, 60.0),
     ('likely', 60.0, 100.0),
 )
+
+# Five-band rain-risk classification for the next-two-hours panel (spec §4E).
+# Boundaries are inclusive on the low end; 100% lands in the last band.
+RAIN_RISK_BANDS: Tuple[Tuple[str, float, float], ...] = (
+    ('Very Low', 0.0, 10.0),
+    ('Low', 11.0, 30.0),
+    ('Moderate', 31.0, 50.0),
+    ('High', 51.0, 70.0),
+    ('Very High', 71.0, 100.0),
+)
+
+# WMO weather-code -> plain condition label (Open-Meteo ``weather_code``).
+# Only the group is stated: a forecast that says "Partly cloudy" is a summary,
+# not a claim about a single cloud, so nothing finer is invented.
+WEATHER_CODE_LABELS: Dict[int, str] = {
+    0: 'Clear sky',
+    1: 'Mainly clear',
+    2: 'Partly cloudy',
+    3: 'Overcast',
+    45: 'Foggy',
+    48: 'Foggy',
+    51: 'Drizzle',
+    53: 'Drizzle',
+    55: 'Drizzle',
+    56: 'Freezing drizzle',
+    57: 'Freezing drizzle',
+    61: 'Light rain',
+    63: 'Rain',
+    65: 'Heavy rain',
+    66: 'Freezing rain',
+    67: 'Freezing rain',
+    71: 'Light snow',
+    73: 'Snow',
+    75: 'Heavy snow',
+    77: 'Snow grains',
+    80: 'Light showers',
+    81: 'Showers',
+    82: 'Violent showers',
+    85: 'Snow showers',
+    86: 'Snow showers',
+    95: 'Thunderstorm',
+    96: 'Thunderstorm with hail',
+    99: 'Thunderstorm with hail',
+}
+
+
+def rain_risk(probability: Any) -> Optional[str]:
+    """Five-band rain-risk label for a probability, or None when unusable."""
+    if probability is None:
+        return None
+    try:
+        value = float(probability)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    value = min(max(value, 0.0), 100.0)
+    for label, low, high in RAIN_RISK_BANDS:
+        if low <= value <= high:
+            return label
+    return 'Very High'
+
+
+def weather_condition(code: Any) -> Optional[str]:
+    """Plain condition label for an Open-Meteo weather code, or None."""
+    if code is None:
+        return None
+    try:
+        return WEATHER_CODE_LABELS.get(int(code))
+    except (TypeError, ValueError):
+        return None
+
+
+def wind_direction_label(degrees: Any) -> Optional[str]:
+    """Compass point for a wind direction in degrees (None when unusable)."""
+    try:
+        value = float(degrees)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value):
+        return None
+    points = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+              'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+    index = int(round((value % 360) / 22.5)) % 16
+    return points[index]
 
 # Circuits of the current calendar, keyed by the slug the matcher produces.
 # The coordinates are the start/finish area of each circuit (Open-Meteo only
@@ -368,6 +458,141 @@ def session_weather(session_key: Any) -> Optional[Dict[str, Any]]:
     return summarise_weather(rows)
 
 
+def weather_readings(session_key: Any) -> List[Dict[str, Any]]:
+    """One row per measured reading of a session, oldest first.
+
+    Keys are the feed's own: ``time_utc`` (ISO, normalized), ``air_temperature``,
+    ``track_temperature``, ``humidity``, ``pressure``, ``wind_speed`` (m/s) and
+    ``wind_direction``, ``rainfall`` (0/1 flag). An empty list means the feed
+    published nothing (or the request failed) — the caller shows an empty
+    state, never an invented row.
+    """
+    try:
+        key = int(session_key)
+    except (TypeError, ValueError):
+        return []
+    try:
+        rows = cached_openf1('weather', session_key=key)
+    except Exception as exc:                    # noqa: BLE001 - never raise
+        logger.warning('OpenF1 weather unavailable for session %s: %s', key, exc)
+        return []
+    readings: List[Dict[str, Any]] = []
+    for record in _records(rows):
+        moment = _utc_datetime(record.get('date'))
+        if moment is None:
+            continue
+        readings.append({
+            'time_utc': _iso_utc(moment),
+            'air_temperature': _finite(record.get('air_temperature')),
+            'track_temperature': _finite(record.get('track_temperature')),
+            'humidity': _finite(record.get('humidity')),
+            'pressure': _finite(record.get('pressure')),
+            'wind_speed': _finite(record.get('wind_speed')),
+            'wind_direction': _finite(record.get('wind_direction')),
+            'rainfall': _finite(record.get('rainfall')),
+        })
+    readings.sort(key=lambda row: row['time_utc'] or '')
+    return readings
+
+
+def weather_interpretation(conditions: Any,
+                           outlook: Any,
+                           session: str = '') -> List[Tuple[str, str]]:
+    """Rule-based weather interpretation for the report's "What This Means".
+
+    Returns ``(title, text)`` pairs — Drivers, Teams, Tyre strategy and Race
+    conditions — each grounded in one measured or forecast number. A missing
+    input yields an honest "can not say" line, never a claim. Drift is never
+    overclaimed: forecast lines carry the confidence in the sentence.
+    """
+    cond = conditions or {}
+    out = outlook or {}
+    prob = out.get('probability')
+    band = out.get('band') or ''
+    conf = out.get('confidence') or ''
+    conf_word = 'medium' if conf == 'moderate' else 'low'
+    air = cond.get('air_temp_mean')
+    track = cond.get('track_temp_mean')
+    wind = cond.get('wind_speed_mean')
+    humidity = cond.get('humidity_mean')
+    wet = cond.get('wet')
+
+    drivers: List[str] = []
+    if wet is True:
+        drivers.append('The session ran wet, so grip was likely patchy and '
+                       'lap times were slower than a dry run.')
+    elif wet is False:
+        drivers.append('The session ran dry, so drivers could use the full '
+                       'track temperature grip window.')
+    if wind is not None and wind > 8.0:
+        drivers.append(f'Strong mean wind ({wind * 3.6:.0f} km/h) may have '
+                       'destabilised the car in fast corners.')
+    elif wind is not None and wind > 4.0:
+        drivers.append(f'Breezy conditions ({wind * 3.6:.0f} km/h) could have '
+                       'made the car tricky in exposed corners.')
+    if not drivers:
+        drivers.append('No measured wind or rain signal is available for this '
+                       'session, so no driver line is drawn.')
+
+    teams: List[str] = []
+    if prob is not None:
+        teams.append(
+            f'The forecast gives a {prob:.0f}% chance of rain ({band}, '
+            f'{conf_word} confidence), so cover for a wet session may be '
+            'worth keeping in the strategy stack.')
+    if track is not None and track >= 35.0:
+        teams.append(f'A hot track ({track:.1f}°C) increases tyre degradation, '
+                     'so a hotter setup bias may cost long-run pace.')
+    elif track is not None and track <= 20.0:
+        teams.append(f'A cool track ({track:.1f}°C) may make tyres hard to '
+                     'bring up to temperature, favouring an early pit.')
+    if not teams:
+        teams.append('Neither a forecast nor a track temperature is available, '
+                     'so no team line is drawn.')
+
+    tyres: List[str] = []
+    if wet is True:
+        tyres.append('With rain recorded, intermediate or wet tyres will '
+                     'have been the safer window than slicks.')
+    elif band in ('possible', 'likely'):
+        tyres.append(f'With {band} rain in the forecast, intermediate tyres '
+                     'are the natural backup if the track wets up.')
+    else:
+        if air is not None and air >= 25.0:
+            tyres.append(f'Warm air ({air:.1f}°C) favours the softer '
+                         'compounds, at the cost of faster wear.')
+        elif prob is not None and prob < 20.0:
+            tyres.append('A dry forecast makes slick tyres the natural choice.')
+    if humidity is not None and humidity > 80.0:
+        tyres.append(f'High humidity ({humidity:.0f}%) can affect cooling '
+                     'and makes rain less likely to evaporate quickly.')
+    if not tyres:
+        tyres.append('No rain or temperature signal is available, so no tyre '
+                     'line is drawn.')
+
+    race: List[str] = []
+    if cond:
+        span = cond.get('samples')
+        if air is not None and track is not None:
+            race.append(f'Across {span} readings the air averaged '
+                        f'{air:.1f}°C and the track {track:.1f}°C.')
+    if out:
+        when = out.get('when_utc') or 'the session hour'
+        race.append(f'For {session or "the next session"} at {when} the '
+                    f'forecast probability of rain is '
+                    f'{prob if prob is not None else "unknown"}%.')
+    if not race:
+        race.append('No measured or forecast weather is available, so race '
+                    'conditions can not be described.')
+
+    return [
+        ('Drivers', ' '.join(drivers)),
+        ('Teams', ' '.join(teams)),
+        ('Tyre strategy', ' '.join(tyres)),
+        ('Race conditions', ' '.join(race)),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Forecast (Open-Meteo)
 # ---------------------------------------------------------------------------
@@ -419,6 +644,7 @@ def _day_payload(coords: Tuple[float, float],
                 'latitude': key[0],
                 'longitude': key[1],
                 'hourly': OPEN_METEO_HOURLY,
+                'minutely_15': OPEN_METEO_MINUTELY,
                 'timezone': 'UTC',
                 'start_date': key[2],
                 'end_date': (day + _dt.timedelta(days=1)).isoformat(),
@@ -494,6 +720,7 @@ def parse_forecast(payload: Any, when_utc: Any) -> Optional[Dict[str, Any]]:
     probability = value_at('precipitation_probability')
     wind_speed = value_at('wind_speed_10m')
     rain_mm = value_at('rain')
+    code = value_at('weather_code')
     if temperature is None and probability is None and wind_speed is None:
         return None
 
@@ -505,6 +732,8 @@ def parse_forecast(payload: Any, when_utc: Any) -> Optional[Dict[str, Any]]:
         ),
         'wind_speed_kmh': wind_speed,
         'rain_mm': rain_mm,
+        'weather_code': int(code) if code is not None else None,
+        'condition': weather_condition(code),
         'latitude': payload.get('latitude'),
         'longitude': payload.get('longitude'),
         'source': 'Open-Meteo',
@@ -586,12 +815,112 @@ def rain_outlook(track_name: Any, when_utc: Any,
         'when_utc': hour.strftime('%Y-%m-%dT%H:%M:%SZ') if hour is not None else None,
         'temperature_c': data.get('temperature_c'),
         'wind_speed_kmh': data.get('wind_speed_kmh'),
+        'condition': data.get('condition'),
+        'rain_mm': data.get('rain_mm'),
     }
 
 
 # The in-process cache of one day of hourly data per (circuit, day).
 _FORECAST_CACHE: Dict[Tuple[float, float, str], Optional[Dict[str, Any]]] = {}
 _FORECAST_LOCK = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# The next two hours, in 15-minute steps
+# ---------------------------------------------------------------------------
+
+def _finite(value: Any) -> Optional[float]:
+    """A finite float, or None: Open-Meteo leaves a gap as null or as NaN."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def parse_timeline(payload: Any, now: Any = None,
+                   minutes: int = TIMELINE_MINUTES) -> Optional[Dict[str, Any]]:
+    """The next ``minutes`` of rain at one coordinate, in 15-minute steps.
+
+    Returns None when the document carries no 15-minute block or none of its
+    steps fall inside the window. A step the service left empty keeps a None
+    value: the chart draws a gap instead of a zero, because "no number" and
+    "no rain" are different statements.
+    """
+    moment = _utc_datetime(now) if now is not None else _dt.datetime.now(
+        _dt.timezone.utc)
+    if moment is None or not isinstance(payload, dict):
+        return None
+    block = payload.get('minutely_15')
+    if not isinstance(block, dict):
+        return None
+    times = block.get('time')
+    if not isinstance(times, (list, tuple)) or not times:
+        return None
+    rain = block.get('precipitation')
+    chance = block.get('precipitation_probability')
+
+    steps: List[Dict[str, Any]] = []
+    for position, raw in enumerate(times):
+        when = _utc_datetime(raw)
+        if when is None:
+            continue
+        ahead = (when - moment).total_seconds() / 60.0
+        if ahead < 0 or ahead > minutes:
+            continue
+        steps.append({
+            'time_utc': _iso_utc(when),
+            'minutes_ahead': int(round(ahead)),
+            'precipitation_mm': (_finite(rain[position])
+                                 if isinstance(rain, (list, tuple))
+                                 and position < len(rain) else None),
+            'probability': (_finite(chance[position])
+                            if isinstance(chance, (list, tuple))
+                            and position < len(chance) else None),
+        })
+    if not steps:
+        return None
+    steps.sort(key=lambda step: step['minutes_ahead'])
+
+    probabilities = [step['probability'] for step in steps
+                     if step['probability'] is not None]
+    amounts = [step['precipitation_mm'] for step in steps
+               if step['precipitation_mm'] is not None]
+    wet = [step['minutes_ahead'] for step in steps
+           if (step['precipitation_mm'] or 0) > 0]
+
+    return {
+        'steps': steps,
+        'step_minutes': TIMELINE_STEP_MIN,
+        'window_minutes': minutes,
+        'peak_probability': max(probabilities) if probabilities else None,
+        'peak_mm': max(amounts) if amounts else None,
+        'total_mm': sum(amounts) if amounts else None,
+        'first_rain_min': wet[0] if wet else None,
+        'observed_at': moment.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'estimated': True,
+        'source': 'Open-Meteo forecast',
+    }
+
+
+def rain_timeline(track_name: Any, now: Any = None,
+                  minutes: int = TIMELINE_MINUTES) -> Optional[Dict[str, Any]]:
+    """The rain timeline for a circuit, or None when it cannot be built."""
+    coords = coords_for(track_name)
+    if coords is None:
+        return None
+    moment = _utc_datetime(now) if now is not None else _dt.datetime.now(
+        _dt.timezone.utc)
+    if moment is None:
+        return None
+    payload = _day_payload(coords, moment.date())
+    timeline = parse_timeline(payload, moment, minutes=minutes)
+    if timeline is None:
+        return None
+    timeline['track_name'] = str(track_name)
+    timeline['latitude'] = coords[0]
+    timeline['longitude'] = coords[1]
+    return timeline
 
 
 # ---------------------------------------------------------------------------

@@ -18,22 +18,25 @@ import plotly.graph_objects as go
 
 from shared import load_race_data, load_race_grid, show_plotly_chart, team_colour
 from config import FASTF1_CONFIG, STREAMLIT_CONFIG
-from season_config import get_race_names, latest_race_index, resolve_csv_track
+from season_config import (
+    get_race_names, get_season_calendar, latest_race_index,
+    resolve_csv_track,
+)
 from styles import (
     fig_layout as _fig_layout,
-    LABEL_FONT, TEXT_SECONDARY,
+    chart_height, LABEL_FONT, TEXT_SECONDARY,
     scaled_height,
 )
 from prediction import (
     predict_race, add_predicted_points, add_price,
-    compute_driver_prices, optimal_lineup, forecast_vs_actual,
-    rows_before_race, feature_report,
-    DEFAULT_BUDGET, DEFAULT_DRIVERS,
+    compute_driver_prices, compute_dnf_rate, optimal_lineup,
+    forecast_vs_actual, rows_before_race, feature_report,
+    DEFAULT_BUDGET, DEFAULT_DRIVERS, W_GRID, W_TEAM, W_FORM,
 )
 from analysis import top3_overlap
 from backtest import walk_forward_backtest, METRICS as BACKTEST_METRICS
 import ui
-from ui import CONFIDENCE_LABELS
+from ui import CONFIDENCE_LABELS, esc
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +264,151 @@ def _forecast_verdict(predicted, summary) -> str:
     return text
 
 
+# Plain names for the five ridge features, for the factor-importance chart.
+_FEATURE_NAMES = {
+    'Grid': 'Starting grid',
+    'TeamPace': 'Team pace',
+    'Form': 'Recent driver form',
+    'Gain': 'Positions usually gained',
+    'Dnf': 'Finish reliability',
+}
+
+# The documented fallback heuristic weights, used when the engine column
+# says the ridge could not be fitted (too little history).
+_FALLBACK_WEIGHTS = {'Grid': W_GRID, 'TeamPace': W_TEAM, 'Form': W_FORM}
+
+
+def _feature_importance(predicted) -> tuple:
+    """(shares, engine_label): each feature's share of the model's pull.
+
+    Ridge coefficients are standardised (features are z-scored), so their
+    absolute values are comparable: a larger share means the feature moves
+    the predicted position more. When the engine is the documented fallback,
+    the published heuristic weights are used and labelled as such. Shares
+    are of the total absolute pull -- a reading aid, not a causal claim.
+    """
+    engine = str(predicted['Engine'].iloc[0]) if 'Engine' in predicted.columns \
+        else 'ridge'
+    coefficients = dict(predicted.attrs.get('coefficients') or {})
+    if engine != 'ridge' or not coefficients:
+        weights = dict(_FALLBACK_WEIGHTS)
+        label = 'Documented fallback weights (grid 40%, pace 35%, form 25%)'
+    else:
+        weights = {name: abs(float(value))
+                   for name, value in coefficients.items()}
+        label = 'Ridge coefficients (standardised), absolute share'
+    total = sum(weights.values()) or 1.0
+    shares = {name: value / total * 100.0 for name, value in weights.items()
+              if value > 0}
+    return shares, label
+
+
+def _why_favourite(predicted) -> str:
+    """One sentence on why the model puts this driver first, from the row.
+
+    Only values the model itself produced are used: grid slot, team-pace and
+    form scores, each read against the field median so the sentence says
+    what is actually above or below the pack.
+    """
+    favourite = predicted.iloc[0]
+    driver = str(favourite['Driver'])
+    grid = int(favourite['Grid'])
+    pace = float(favourite.get('TeamPace', 0.5))
+    form = float(favourite.get('Form', 0.5))
+    pace_median = float(pd.to_numeric(
+        predicted.get('TeamPace'), errors='coerce').median() or 0.5)
+    form_median = float(pd.to_numeric(
+        predicted.get('Form'), errors='coerce').median() or 0.5)
+    parts = [f'starts P{grid}']
+    if pace >= pace_median:
+        parts.append(f"team pace {pace:.2f} (field median {pace_median:.2f})")
+    if form >= form_median:
+        parts.append(f"recent form {form:.2f} (field median {form_median:.2f})")
+    return f'{driver} leads the forecast: ' + ', '.join(parts) + '.'
+
+
+def _initials(name: str) -> str:
+    """Two-letter avatar initials from a driver name."""
+    words = str(name or '').replace('-', ' ').split()
+    if not words:
+        return '?'
+    if len(words) == 1:
+        return words[0][:2].upper()
+    return (words[0][0] + words[-1][0]).upper()
+
+
+def _podium_cards(predicted, year) -> None:
+    """The predicted podium as three cards, left-to-right 1-2-3 so the
+    favourite reads first; P1 carries the stronger emphasis."""
+    if predicted.empty:
+        return
+    cards = []
+    for _, row in predicted.head(3).iterrows():
+        place = int(row['Predicted'])
+        team = str(row.get('Team', ''))
+        colour = team_colour(team, year)
+        win = float(row['WinProb'])
+        pts = int(row['PredictedPts'])
+        position_word = {1: 'Winner', 2: 'Runner-up', 3: 'Third'}[place]
+        cards.append(
+            f'<div class="f1-podium-card f1-podium-card--p{place}">'
+            f'<div class="f1-podium-pos">{position_word} · P{place}</div>'
+            f'{ui.portrait_html(str(row["Driver"]), colour)}'
+            f'<div class="f1-podium-name">{esc(row["Driver"])}</div>'
+            f'<div class="f1-podium-team">{esc(team)}</div>'
+            f'<div class="f1-podium-win">{win:.1f}%</div>'
+            f'<div class="f1-podium-winlabel">chance of winning</div>'
+            f'<div class="f1-podium-pts">{pts} pts expected</div>'
+            f'</div>'
+        )
+    st.markdown(f'<div class="f1-podium-grid">{"".join(cards)}</div>',
+                unsafe_allow_html=True)
+
+
+def _takeaways(predicted, dnf_rates) -> list:
+    """Dynamic one-line insights, every one computed from the forecast."""
+    items = []
+    if predicted.empty:
+        return items
+    favourite = predicted.iloc[0]
+    items.append(f'{favourite["Driver"]} is the model favourite at '
+                 f'{float(favourite["WinProb"]):.1f}% win chance.')
+    if len(predicted) > 1:
+        second = predicted.iloc[1]
+        items.append(f'{second["Driver"]} is the strongest podium contender '
+                     f'({float(second["WinProb"]):.1f}%).')
+    gains = (pd.to_numeric(predicted['Grid'], errors='coerce')
+             - pd.to_numeric(predicted['Predicted'], errors='coerce'))
+    if gains.notna().any():
+        idx = int(gains.idxmax())
+        driver = predicted.loc[idx, 'Driver']
+        items.append(f'Biggest riser: {driver} is predicted to gain '
+                     f'{int(gains.loc[idx])} places from the grid.')
+    if dnf_rates:
+        driver, rate = max(dnf_rates.items(), key=lambda kv: kv[1])
+        items.append(f'Highest DNF risk: {driver} ({rate * 100:.0f}% of '
+                     f'earlier races not classified).')
+    if 'Team' in predicted.columns:
+        team_win = (predicted.groupby('Team')['WinProb'].sum()
+                    .sort_values(ascending=False))
+        if not team_win.empty:
+            items.append(f'Strongest constructor: {team_win.index[0]} '
+                         f'({float(team_win.iloc[0]):.1f}% combined win chance).')
+    if 'Price' in predicted.columns:
+        priced = predicted[pd.to_numeric(
+            predicted['Price'], errors='coerce').notna()]
+        if not priced.empty:
+            value = (pd.to_numeric(priced['PredictedPts'], errors='coerce')
+                     / pd.to_numeric(priced['Price'], errors='coerce')
+                     .replace(0, pd.NA))
+            if value.notna().any():
+                idx = int(value.idxmax())
+                items.append(f'Best fantasy value: '
+                             f'{priced.loc[idx, "Driver"]} '
+                             f'({value.loc[idx]:.1f} pts per $M).')
+    return items
+
+
 # ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
@@ -322,44 +470,96 @@ def page():
     # is run once here and handed to the tabs that need it.
     per_race, summary = _cached_backtest(race_df)
 
+    engine = str(predicted['Engine'].iloc[0]) if 'Engine' in predicted.columns \
+        else 'ridge'
+    engine_label = 'Ridge regression' if engine == 'ridge' \
+        else 'Documented fallback heuristic'
+
+    # Race context for the header: round number and whether the race has a
+    # recorded result yet (completed) or not (upcoming).
+    target_rows = (race_df[race_df['Track'] == csv_race]
+                   if csv_race and 'Track' in race_df.columns
+                   else race_df.iloc[0:0])
+    target_round = None
+    if not target_rows.empty and 'Round' in target_rows.columns:
+        rounds = pd.to_numeric(target_rows['Round'], errors='coerce').dropna()
+        target_round = int(rounds.min()) if not rounds.empty else None
+    race_done = (not target_rows.empty and 'Position' in target_rows.columns
+                 and target_rows['Position'].notna().any())
+    race_status = 'Completed' if race_done else 'Upcoming'
+
     ui.page_header(
-        "Predictor and fantasy",
-        "Who the model expects to win the Grand Prix you pick, how sure it "
-        "is, the cheapest fantasy line-up, and how accurate the model has "
-        "actually been.",
-        chips=[('season', str(year)), ('', selected_race),
+        "Predictor & Fantasy",
+        "Forecast race results, explore what-if scenarios, and build the "
+        "best fantasy line-up from statistical models trained on historical "
+        "and current season data.",
+        chips=[('season', str(year)),
+               ('round', f'{target_round} of {len(all_races)}'
+                if target_round else selected_race),
+               ('status', race_status),
                ('', f'{len(predicted)} drivers'),
-               ('estimated', 'forecast'),
-               ('', 'OpenF1 live data')],
+               ('model', engine_label),
+               ('estimated', 'forecast')],
     )
 
     ui.kpis([
-        {'label': 'The model expects', 'value': str(favourite['Driver']),
+        {'label': 'Model favourite', 'icon': 'crown',
+         'value': str(favourite['Driver']),
          'sub': f"to win, at {float(favourite['WinProb']):.1f}% chance "
-                 f"(estimated)",
+                f"(estimated)",
          'tone': 'accent'},
-        {'label': 'How sure the forecast is', 'value': quality_label,
-         'sub': f"from {n_history} earlier races", 'tone': 'info'},
-        {'label': 'Races used to build it', 'value': f'{n_history}',
+        {'label': 'Forecast quality', 'icon': 'layers', 'value': quality_label,
+         'sub': f"from {n_history} earlier races - the chance itself is "
+                f"separate", 'tone': 'info'},
+        {'label': 'Training rounds', 'value': f'{n_history}',
          'sub': 'the rounds before this race only', 'tone': ''},
-        {'label': 'Drivers on the grid', 'value': f'{len(grid)}',
+        {'label': 'Drivers on the grid', 'icon': 'flag',
+         'value': f'{len(grid)}',
          'sub': 'the starting order from qualifying', 'tone': ''},
     ])
 
+    ui.verdict(_why_favourite(predicted), label='Why this favourite')
+
+    # The selected Grand Prix at a glance: flag, circuit country, round,
+    # calendar date and whether a result exists yet.
+    calendar = get_season_calendar(year) or []
+    event = next((row for row in calendar
+                  if row.get('name') in (selected_race, csv_race)), {})
+    country = str(event.get('country') or event.get('location') or '')
+    event_date = event.get('date')
+    date_text = ''
+    if event_date is not None:
+        try:
+            date_text = pd.Timestamp(event_date).strftime('%a %d %b %Y')
+        except (TypeError, ValueError):
+            date_text = str(event_date)
+    status_class = 'f1-racecard-status--live' if race_status == 'Upcoming' else ''
+    ui.card(
+        f'<div class="f1-racecard">{ui.flag_html(country)}'
+        f'<div><div class="f1-racecard-name">{esc(selected_race)}</div>'
+        f'<div class="f1-racecard-meta">'
+        f'{esc(country)} · Round {esc(target_round) if target_round else "—"}'
+        f'{" · " + esc(date_text) if date_text else ""}</div></div>'
+        f'<span class="f1-racecard-status {status_class}">'
+        f'{esc(race_status)}</span></div>'
+    )
+
     # Every panel is built on every rerun: lazy tabs left the panel blank for a
     # moment while the second run arrived, which reads as a broken page.
-    tabs = st.tabs(["Race forecast", "Fantasy team",
-                     "Forecast and the real result",
-                     "How accurate is the model?"])
+    tabs = st.tabs(["Race Forecast", "Fantasy Team",
+                     "Forecast vs Actual",
+                     "Model & Accuracy", "What-If Scenarios"])
 
     with tabs[0]:
-        _tab_forecast(predicted, year, n_history, summary)
+        _tab_forecast(predicted, year, n_history, summary, history)
     with tabs[1]:
         _tab_fantasy(predicted, year)
     with tabs[2]:
-        _tab_actual(race_df, csv_race or selected_race, predicted)
+        _tab_actual(race_df, csv_race or selected_race, predicted, year)
     with tabs[3]:
-        _tab_backtest(per_race, summary)
+        _tab_backtest(per_race, summary, predicted)
+    with tabs[4]:
+        _tab_whatif(history, grid, predicted)
 
     ui.steps([
         "Pick the Grand Prix you want to read about. The forecast is built "
@@ -385,66 +585,117 @@ def page():
 # ---------------------------------------------------------------------------
 
 @st.fragment
-def _tab_forecast(predicted, year, n_history, summary):
+def _tab_forecast(predicted, year, n_history, summary, history=None):
     ui.section(
-        "The podium the model expects",
-        "estimated by a small regression from the starting order plus the "
-        "team's season and the driver's recent results",
-        hint="A forecast is a guess at the finishing order. The model learns "
-             "from the rounds before this one how much the starting order, "
-             "the team's pace, the driver's recent finishes, the places the "
-             "driver usually gains and how often the driver finishes actually "
-             "matter.",
+        "Predicted podium",
+        "estimated from the starting grid, team pace and recent form",
+        hint="The three drivers the model expects at the front, each with "
+             "the chance of winning and the points that finish would be "
+             "worth.",
     )
 
     ui.estimate_note(_plain_caveat(summary))
 
-    podium = []
-    for _, row in predicted.head(3).iterrows():
-        team = str(row.get('Team', ''))
-        podium.append({
-            'position': int(row['Predicted']),
-            'name': row['Driver'],
-            'team': team,
-            'value': f"{float(row['WinProb']):.1f}% chance of winning",
-            'sub': f"expected to finish {_ordinal(int(row['Predicted']))}",
-            'colour': team_colour(team, year),
-        })
-    ui.result_rows(podium, empty_text="No forecast available.")
+    _podium_cards(predicted, year)
 
     ui.section(
-        "The forecast for every driver",
-        "the order the model expects and how risky each place is",
-        hint="The expected outcome is the finishing place the model expects "
-             "and the championship points it would be worth. The risk says "
-             "how easily the order could change: two drivers with almost the "
-             "same rating are close to swapping places.",
+        "Key forecast factors",
+        "what actually moves this forecast",
+        hint="Each bar is a feature's share of the model's total pull "
+             "(standardised coefficients, so they are comparable). A bigger "
+             "bar moves the predicted place more - it is influence on the "
+             "ranking, not proof of cause.",
     )
 
+    shares, importance_label = _feature_importance(predicted)
+    if shares:
+        ordered = sorted(shares.items(), key=lambda kv: kv[1], reverse=True)
+        fig_factors = go.Figure()
+        for feature, share in ordered:
+            fig_factors.add_trace(go.Bar(
+                x=[share], y=[_FEATURE_NAMES.get(feature, feature)],
+                orientation='h',
+                marker_color='#00D6B5',
+                text=f'{share:.0f}%', textposition='outside',
+                textfont=dict(size=10, color=TEXT_SECONDARY),
+                hovertemplate=(f'<b>{esc(_FEATURE_NAMES.get(feature, feature))}</b>'
+                               f'<br>Share of the total pull: {share:.1f}%'
+                               f'<extra></extra>'),
+            ))
+        fig_factors.update_layout(**_fig_layout(
+            height=scaled_height('bars', len(ordered)),
+            xaxis=dict(rangemode='tozero'),
+            xaxis_title=dict(text='Share of total pull (%)', font=LABEL_FONT),
+            yaxis=dict(autorange='reversed', showgrid=False),
+            showlegend=False, bargap=0.35,
+        ))
+        show_plotly_chart(fig_factors)
+        ui.caption(importance_label + '. Features the season data does not '
+                   'carry (qualifying gap, circuit history, weather) are '
+                   'listed under Model & Accuracy, not guessed.')
+    else:
+        ui.empty('No feature weights available for this forecast')
+
+    dnf_rates = compute_dnf_rate(history) if history is not None else {}
+
+    ui.section(
+        "Full race forecast",
+        "the order the model expects and how risky each place is",
+        hint="Expected points are the championship points that predicted "
+             "finish would be worth. DNF risk is the share of earlier races "
+             "the driver was not classified in. Podium and top-5 "
+             "probabilities are not modelled, so they are not shown.",
+    )
+
+    search = st.text_input('Search drivers', key='pred_search',
+                           placeholder='Driver name...')
+    teams = sorted({str(team) for team in predicted.get('Team', [])
+                    if str(team).strip()})
+    team_filter = st.selectbox('Filter by constructor',
+                               ['All constructors'] + teams,
+                               key='pred_team')
+
+    view = predicted.copy()
+    if team_filter != 'All constructors':
+        view = view[view['Team'].astype(str) == team_filter]
+    if search.strip():
+        view = view[view['Driver'].astype(str).str.contains(
+            search.strip(), case=False, na=False)]
+
     risks = _risk_labels(predicted)
+    risk_by_driver = {str(driver): risk
+                      for driver, risk in zip(predicted['Driver'], risks)}
     rows = []
-    for (_, row), risk in zip(predicted.iterrows(), risks):
+    for _, row in view.iterrows():
         level = str(row.get('Level', ''))
         label = CONFIDENCE_LABELS.get(level, (level, 'dim'))
+        risk = risk_by_driver.get(str(row['Driver']), 'Medium')
+        dnf = dnf_rates.get(str(row['Driver']))
         rows.append([
             f"P{int(row['Predicted'])}",
             row['Driver'],
             row.get('Team', ''),
             f"P{int(row['Grid'])}",
-            f"Finishes {_ordinal(int(row['Predicted']))}, worth "
-            f"{int(row['PredictedPts'])} points",
+            _ordinal(int(row['Predicted'])),
+            f"{int(row['PredictedPts'])} pts",
             f"{float(row['WinProb']):.1f}%",
+            f"{dnf * 100:.0f}%" if dnf is not None else '—',
             {'value': risk,
              'tone': {'High': 'bad', 'Medium': 'dim', 'Low': 'good'}[risk]},
             {'value': f"{label[0]} ({n_history} races of history)",
              'tone': label[1]},
         ])
     ui.data_table(
-        ['Predicted finish', 'Driver', 'Team', 'Starting place',
-         'Expected outcome', 'Chance of winning (estimated)',
-         'Risk of a different order', 'How sure the forecast is'],
+        ['Pred. pos.', 'Driver', 'Constructor', 'Grid', 'Exp. finish',
+         'Exp. points', 'Win chance (est.)', 'DNF risk',
+         'Risk of a different order', 'Forecast confidence'],
         rows,
     )
+
+    csv_text = view[['Predicted', 'Driver', 'Team', 'Grid', 'PredictedPts',
+                     'WinProb']].to_csv(index=False)
+    st.download_button('Export forecast as CSV', csv_text,
+                       file_name=f'forecast_{year}.csv', key='pred_csv')
 
     ui.verdict(_forecast_verdict(predicted, summary))
 
@@ -481,6 +732,74 @@ def _tab_forecast(predicted, year, n_history, summary):
         "and not as the chance of a result."
     )
 
+    ui.section(
+        "Team win probability",
+        "each constructor's chance aggregated from its drivers",
+        hint="A team's chance is the sum of its two drivers' win chances: "
+             "either driver winning counts once for the team.",
+    )
+
+    team_win = (predicted.groupby('Team')['WinProb'].sum()
+                .sort_values(ascending=False)) if 'Team' in predicted.columns \
+        else pd.Series(dtype=float)
+    if not team_win.empty:
+        fig_team = go.Figure(go.Pie(
+            labels=[f'{team} · {value:.1f}%'
+                    for team, value in team_win.items()],
+            values=list(team_win.values),
+            hole=0.55,
+            marker=dict(colors=[team_colour(team, year)
+                                for team in team_win.index],
+                        line=dict(color='#151A23', width=2)),
+            textinfo='none',
+            hovertemplate='<b>%{label}</b><extra></extra>',
+        ))
+        fig_team.update_layout(**_fig_layout(
+            height=chart_height('row'),
+            showlegend=True,
+            legend=dict(orientation='v', x=1.02, y=0.5),
+        ))
+        show_plotly_chart(fig_team)
+        ui.caption('Donut: each slice is one constructor. Centre number is '
+                   'the favourite\'s share.')
+
+    ui.section(
+        "Expected championship points",
+        "what the predicted finish would be worth",
+        hint="Points for the predicted place (25 for a win down to 1 for "
+             "tenth). This is the forecast's points, not a promise.",
+    )
+
+    top_pts = predicted.head(10).sort_values('PredictedPts', ascending=True)
+    fig_pts = go.Figure()
+    for _, row in top_pts.iterrows():
+        fig_pts.add_trace(go.Bar(
+            x=[int(row['PredictedPts'])], y=[row['Driver']], orientation='h',
+            marker_color=team_colour(row.get('Team', ''), year),
+            text=str(int(row['PredictedPts'])), textposition='outside',
+            textfont=dict(size=10, color=TEXT_SECONDARY),
+            hovertemplate=(f"<b>{esc(row['Driver'])}</b><br>"
+                           f"Expected points: {int(row['PredictedPts'])}"
+                           f"<extra></extra>"),
+        ))
+    fig_pts.update_layout(**_fig_layout(
+        height=scaled_height('bars', len(top_pts)),
+        xaxis=dict(rangemode='tozero'),
+        xaxis_title=dict(text='Expected points', font=LABEL_FONT),
+        yaxis=dict(autorange='reversed', showgrid=False),
+        showlegend=False,
+    ))
+    show_plotly_chart(fig_pts)
+
+    ui.section(
+        "Key takeaways",
+        "what the forecast adds up to, in brief",
+        hint="Every line below is computed from the forecast above - no "
+             "hand-written claims.",
+    )
+    for item in _takeaways(predicted, dnf_rates):
+        ui.chips([item])
+
 
 @st.fragment
 def _tab_fantasy(predicted, year):
@@ -501,7 +820,32 @@ def _tab_fantasy(predicted, year):
         drv_count = st.slider("Drivers per team", 3, 8, DEFAULT_DRIVERS,
                               key="f_count")
 
-    chosen = optimal_lineup(predicted, budget=budget, count=drv_count)
+    risks = _risk_labels(predicted)
+    risk_by_driver = {str(driver): risk
+                      for driver, risk in zip(predicted['Driver'], risks)}
+    price_by_driver = {}
+    for _, row in predicted.iterrows():
+        price = row.get('Price')
+        price_by_driver[str(row['Driver'])] = (
+            int(price) if pd.notna(price) else None)
+
+    all_drivers = [str(driver) for driver in predicted['Driver']]
+    picked_names = st.multiselect(
+        'Your drivers',
+        options=all_drivers, key='f_picks',
+        help='Pick drivers for your team, or press Optimize My Team to take '
+             'the best lineup the budget allows. Empty means the optimizer '
+             'lineup is shown.',
+    )
+    if st.button('Optimize My Team', key='f_optimize'):
+        st.session_state['f_picks'] = optimal_lineup(
+            predicted, budget=budget, count=drv_count)
+        st.rerun()
+
+    # The optimizer's lineup is the default view; the user's own picks win
+    # when both exist (the button above writes into the same widget state).
+    chosen = list(picked_names) if picked_names else optimal_lineup(
+        predicted, budget=budget, count=drv_count)
     if not chosen:
         ui.empty("No affordable lineup within budget",
               "Raise the budget, or pick a race with more priced drivers.")
@@ -510,23 +854,34 @@ def _tab_fantasy(predicted, year):
     team = predicted[predicted['Driver'].isin(chosen)]
     cost = int(pd.to_numeric(team['Price'], errors='coerce').fillna(0).sum())
     pts = int(team['PredictedPts'].sum())
+    over_budget = cost > budget
+    over_count = len(team) > drv_count
 
-    ui.kpis([
-        {'label': 'Projected points', 'value': str(pts),
-         'sub': 'if the forecast comes true (estimated)', 'tone': 'accent'},
-        {'label': 'Lineup cost', 'value': f'${cost}M',
-         'sub': f'budget ${budget}M', 'tone': ''},
-        {'label': 'Drivers picked', 'value': f'{len(team)}/{drv_count}',
-         'sub': 'slots filled', 'tone': 'warn' if len(team) < drv_count else ''},
-    ])
-
-    if len(team) < drv_count:
+    if over_budget:
+        ui.note(f'This team costs ${cost}M, which is ${cost - budget}M over '
+                f'the ${budget}M budget. Drop a driver or raise the budget.',
+                kind='warn')
+    if over_count:
+        ui.note(f'This team has {len(team)} drivers but the limit is '
+                f'{drv_count}.', kind='warn')
+    if len(team) < drv_count and not over_budget:
         ui.note(
             f"Only {len(team)} of {drv_count} drivers fit the ${budget}M budget "
             f"(or have a derivable price). Raise the budget or lower the "
             f"driver count for a full lineup.",
             kind='warn',
         )
+
+    ui.kpis([
+        {'label': 'Projected points', 'value': str(pts),
+         'sub': 'if the forecast comes true (estimated)', 'tone': 'accent'},
+        {'label': 'Lineup cost', 'value': f'${cost}M',
+         'sub': f'budget ${budget}M',
+         'tone': 'warn' if over_budget else ''},
+        {'label': 'Drivers picked', 'value': f'{len(team)}/{drv_count}',
+         'sub': 'slots filled',
+         'tone': 'warn' if (len(team) < drv_count or over_count) else ''},
+    ])
 
     ui.section(
         "The recommended lineup",
@@ -539,30 +894,35 @@ def _tab_fantasy(predicted, year):
     rows = []
     for _, row in team.sort_values('Predicted').iterrows():
         team_name = str(row.get('Team', ''))
+        risk = risk_by_driver.get(str(row['Driver']), 'Medium')
         rows.append({
             'position': int(row['Predicted']),
             'name': row['Driver'],
             'team': team_name,
             'value': f"${int(row['Price'])}M" if pd.notna(row.get('Price')) else '—',
             'sub': f"expected P{int(row['Predicted'])}, "
-                   f"{int(row['PredictedPts'])} points (estimated)",
+                   f"{int(row['PredictedPts'])} points, risk {risk} (estimated)",
             'colour': team_colour(team_name, year),
         })
     ui.result_rows(rows, empty_text="No lineup selected.")
 
     table_rows = []
     for _, row in team.sort_values('Predicted').iterrows():
+        price = row.get('Price')
+        pts_val = int(row['PredictedPts'])
+        ratio = f'{pts_val / float(price):.1f}' if pd.notna(price) and price else '—'
         table_rows.append([
             f"P{int(row['Predicted'])}",
             row['Driver'],
             row.get('Team', ''),
             f"P{int(row['Grid'])}",
-            f"{int(row['PredictedPts'])} points",
-            f"${int(row['Price'])}M" if pd.notna(row.get('Price')) else '—',
+            f"{pts_val} points",
+            f"${int(price)}M" if pd.notna(price) else '—',
+            f"{ratio} pts/$M",
         ])
     ui.data_table(
         ['Expected finish', 'Driver', 'Team', 'Starting place',
-         'Projected points (estimated)', 'Price'],
+         'Projected points (estimated)', 'Price', 'Value'],
         table_rows,
     )
 
@@ -583,24 +943,32 @@ def _tab_fantasy(predicted, year):
     ui.caption(
         "Prices are derived from season points. A driver without season "
         "points has no derivable price, shown as a dash and not as a floor "
-        "price."
+        "price. Selection percentage is not available from the public "
+        "results feed, so it is not shown."
     )
     price_rows = []
     for _, row in predicted.sort_values('Price', ascending=False,
                                         na_position='last').iterrows():
         price = row.get('Price')
+        pts_val = int(row['PredictedPts'])
+        ratio = f'{pts_val / float(price):.1f}' if pd.notna(price) and price else '—'
+        risk = risk_by_driver.get(str(row['Driver']), 'Medium')
         price_rows.append([
             row['Driver'],
             row.get('Team', ''),
             f"${int(price)}M" if pd.notna(price) else '—',
-            f"{int(row['PredictedPts'])} points",
+            f"{pts_val} points",
+            f"{ratio} pts/$M",
+            {'value': risk,
+             'tone': {'High': 'bad', 'Medium': 'dim', 'Low': 'good'}[risk]},
         ])
     ui.data_table(['Driver', 'Team', 'Price (estimated from points so far)',
-                'Projected points this race'], price_rows)
+                'Projected points this race', 'Value', 'Risk'],
+                price_rows)
 
 
 @st.fragment
-def _tab_actual(race_df, selected_race, predicted):
+def _tab_actual(race_df, selected_race, predicted, year=None):
     ui.section(
         "What the forecast said and what actually happened",
         "the model never saw the race it is scored against",
@@ -651,6 +1019,41 @@ def _tab_actual(race_df, selected_race, predicted):
         {'label': 'Points difference', 'value': f'{points_gap:+d}',
          'sub': 'projected minus actually scored', 'tone': ''},
     ])
+
+    scored_rows = joined[joined['Actual'].notna()]
+    if not scored_rows.empty:
+        fig_scatter = go.Figure()
+        for _, row in scored_rows.iterrows():
+            fig_scatter.add_trace(go.Scatter(
+                x=[int(row['Predicted'])], y=[int(row['Actual'])],
+                mode='markers',
+                marker=dict(size=9, color=team_colour(
+                    str(row.get('Team', '')), year)
+                    if 'Team' in row else TEXT_SECONDARY),
+                name=str(row['Driver']),
+                hovertemplate=(f"<b>{esc(row['Driver'])}</b><br>"
+                               f"Predicted P{int(row['Predicted'])}<br>"
+                               f"Actual P{int(row['Actual'])}<extra></extra>"),
+            ))
+        n = max(int(scored_rows['Actual'].max()),
+                int(scored_rows['Predicted'].max()), 1)
+        fig_scatter.add_trace(go.Scatter(
+            x=[1, n], y=[1, n], mode='lines', name='Perfect',
+            line=dict(color=TEXT_SECONDARY, dash='dash', width=1),
+            hoverinfo='skip', showlegend=False,
+        ))
+        fig_scatter.update_layout(**_fig_layout(
+            height=chart_height('row'),
+            xaxis=dict(rangemode='tozero', dtick=1),
+            xaxis_title=dict(text='Predicted position', font=LABEL_FONT),
+            yaxis=dict(rangemode='tozero', dtick=1, autorange='reversed'),
+            yaxis_title=dict(text='Actual position', font=LABEL_FONT),
+            showlegend=False,
+        ))
+        show_plotly_chart(fig_scatter)
+        ui.caption('Each dot is one driver. The dashed line is a perfect '
+                   'forecast: dots on it are exact, above it the driver '
+                   'finished worse than predicted.')
 
     rows = []
     for _, row in joined.iterrows():
@@ -720,7 +1123,48 @@ def _method_label(engine) -> str:
     return 'Ridge regression'
 
 
-def _tab_backtest(per_race, summary):
+def _tab_backtest(per_race, summary, predicted=None):
+    ui.section(
+        "The model behind the forecast",
+        "how it is built, and what it cannot see",
+        hint="A ridge regression on five features known before the race. "
+             "The coefficients below are the fitted values from this exact "
+             "forecast - larger absolute value, bigger pull on the "
+             "predicted place.",
+    )
+
+    if predicted is not None and not predicted.empty:
+        engine = str(predicted['Engine'].iloc[0]) if 'Engine' in predicted.columns \
+            else 'ridge'
+        engine_label = 'Ridge regression (numpy)' if engine == 'ridge' \
+            else 'Documented fallback heuristic'
+        n_train = predicted.attrs.get('n_train')
+        imputed = predicted.attrs.get('imputed')
+        ui.kpis([
+            {'label': 'Engine', 'value': engine_label,
+             'sub': ('fitted on earlier rounds only' if engine == 'ridge'
+                     else 'too little history for the ridge fit'),
+             'tone': 'accent'},
+            {'label': 'Training rows', 'value': str(n_train) if n_train is not None else '—',
+             'sub': 'driver-races in the fit', 'tone': ''},
+            {'label': 'Imputed cells', 'value': str(imputed) if imputed is not None else '—',
+             'sub': 'missing values filled with the training median',
+             'tone': ''},
+        ])
+        coefficients = dict(predicted.attrs.get('coefficients') or {})
+        if coefficients:
+            coef_rows = [[_FEATURE_NAMES.get(name, name),
+                          f'{float(value):+.3f}',
+                          f'{abs(float(value)):.3f}']
+                         for name, value in coefficients.items()]
+            ui.data_table(
+                ['Feature (standardised)', 'Coefficient', 'Absolute pull'],
+                coef_rows, compact=True,
+            )
+            ui.caption('Coefficients come from the fitted ridge model on the '
+                       'rounds before this race. They describe influence on '
+                       'the ranking, not cause and effect.')
+
     ui.section(
         "How accurate has the model been?",
         "the forecast is run over the season one race at a time",
@@ -897,6 +1341,75 @@ def _tab_backtest(per_race, summary):
             'forecast cannot use it and does not pretend to.',
             label='What is missing',
         )
+
+
+@st.fragment
+def _tab_whatif(history, grid, predicted):
+    ui.section(
+        "What-if scenarios",
+        "swap two grid slots and watch the forecast move",
+        hint="The scenario swaps two drivers' starting places, then runs the "
+             "same model on the same history. Only the grid changed - team "
+             "pace, form and everything else stay as they are.",
+    )
+
+    ui.estimate_note(
+        'A what-if re-runs the real forecast with one change, so the '
+        'difference is the model\'s own answer to that change. Weather, '
+        'tire strategy and DNF scenarios cannot be simulated: the model '
+        'has no inputs for them, so they are not faked here.'
+    )
+
+    drivers = [str(driver) for driver in predicted['Driver']]
+    driver_a = st.selectbox('Driver A (moves to B\'s grid slot)', drivers,
+                            key='wi_a')
+    rest = [driver for driver in drivers if driver != driver_a]
+    driver_b = st.selectbox('Driver B (moves to A\'s grid slot)', rest,
+                            key='wi_b')
+    if st.button('Run scenario', key='wi_run_btn', type='primary'):
+        st.session_state['wi_has_run'] = True
+
+    if not st.session_state.get('wi_has_run'):
+        return
+
+    swapped = dict(grid)
+    swapped[driver_a], swapped[driver_b] = grid[driver_b], grid[driver_a]
+    scenario = add_predicted_points(_cached_forecast(history, swapped))
+    if scenario.empty:
+        ui.empty('The scenario could not be built')
+        return
+
+    base_idx = {str(driver): i for i, driver in enumerate(predicted['Driver'])}
+    scen_idx = {str(driver): i for i, driver in enumerate(scenario['Driver'])}
+    rows = []
+    for driver in (driver_a, driver_b):
+        base = predicted.iloc[base_idx[driver]]
+        scen = scenario.iloc[scen_idx[driver]]
+        base_win = float(base['WinProb'])
+        scen_win = float(scen['WinProb'])
+        rows.append([
+            str(driver),
+            f"P{int(base['Grid'])} → P{int(scen['Grid'])}",
+            f"P{int(base['Predicted'])} → P{int(scen['Predicted'])}",
+            f"{base_win:.1f}% → {scen_win:.1f}% "
+            f"({scen_win - base_win:+.1f} pp)",
+            f"{int(base['PredictedPts'])} → {int(scen['PredictedPts'])} pts",
+        ])
+    ui.data_table(
+        ['Driver', 'Grid slot', 'Predicted finish', 'Win chance',
+         'Expected points'],
+        rows, compact=True,
+    )
+    changed = sum(
+        1 for name in drivers
+        if int(predicted.iloc[base_idx[name]]['Predicted'])
+        != int(scenario.iloc[scen_idx[name]]['Predicted']))
+    ui.verdict(
+        f'Swapping {driver_a} and {driver_b} on the grid changes the '
+        f'predicted finishing place of {changed} drivers. The numbers above '
+        f'are the model\'s own re-run, not a new guess.',
+        label='Scenario result',
+    )
 
 
 page()

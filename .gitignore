@@ -146,6 +146,8 @@ dmypy.json
 *.gif
 !assets/**/*.png
 !assets/**/*.jpg
+!src/assets/**/*.png
+!src/assets/**/*.jpg
 
 # -----------------------------------------------------------------------------
 # Playwright MCP

@@ -7,8 +7,8 @@ The season dashboard.
 The page answers one question before anything else -- *where does the season
 stand right now?* -- and then backs it up with the numbers, in this order:
 
-1. the hero band: the story in one sentence, plus the four numbers that
-   matter;
+1. the hero band: the story in one sentence, the championship points
+   chart, plus the four numbers that matter;
 2. the tiles: the same four numbers in a row;
 3. "Where the title stands": the championship tables for drivers and teams;
 4. "Last weekend": the finishing order of the most recent Grand Prix;
@@ -42,10 +42,10 @@ import ui
 from ui import esc
 from analysis import latest_race_rows, points_progression
 from config import FASTF1_CONFIG
-from glossary import long as glossary_long
 from glossary import short as glossary_short
 from shared import load_race_data, season_progress, show_plotly_chart, team_colour
 from styles import (
+    ACCENT,
     LABEL_FONT,
     TEXT_SECONDARY,
     chart_height,
@@ -129,11 +129,10 @@ def _title_fight(leader, gap, second, races_left, calendar_known) -> str:
         return (f'{leader} and {second} are level on points. A single race win is '
                 f'worth {WIN_POINTS} points, so one race could decide the title.')
     if gap < WIN_POINTS:
-        text = (f'{leader} is {gap} points ahead of {second} - less than the '
-                f'{WIN_POINTS} points a single race win is worth.')
+        text = (f'{leader} is {gap} points ahead of {second} - less than one '
+                f'race win ({WIN_POINTS} points).')
     else:
-        text = (f'{leader} is {gap} points ahead of {second}. A single race win is '
-                f'worth {WIN_POINTS} points, so the gap is worth about '
+        text = (f'{leader} is {gap} points ahead of {second} - about '
                 f'{gap // WIN_POINTS} race wins.')
     if calendar_known and races_left:
         text += f' There are {_plural(races_left, "race")} left in the calendar.'
@@ -258,6 +257,7 @@ def _progression_chart(df, drivers, driver_teams, year):
         yaxis=dict(rangemode='tozero'),
         yaxis_title=dict(text='Points', font=LABEL_FONT),
         hovermode='x unified',
+        legend=dict(orientation='h', x=0, y=-0.18),
     ))
     return fig
 
@@ -289,6 +289,128 @@ def _wins_chart(wins, driver_teams, year):
     return fig
 
 
+def _points_chart(drv_points, driver_teams, year):
+    """Championship points of the leading drivers, as horizontal bars.
+
+    The hero band points at this chart: the story is the shape of the
+    standings, not a paragraph, so the page opens with the bars and one
+    sentence rather than a block of text. Team colours come from the
+    results feed via ``team_colour`` like every other chart.
+    """
+    if drv_points is None or drv_points.empty:
+        return None
+    top = drv_points.head(8)
+    fig = go.Figure()
+    for driver, points in top.items():
+        fig.add_trace(go.Bar(
+            x=[int(points)], y=[driver], orientation='h',
+            marker=dict(color=team_colour(driver_teams.get(driver, ''), year),
+                        line=dict(width=0)),
+            text=_fmt(points), textposition='outside',
+            textfont=dict(size=11, color=TEXT_SECONDARY),
+            # The driver's name goes into the hover label as HTML, so it is
+            # escaped like any other dynamic value.
+            hovertemplate=(f'<b>{esc(driver)}</b><br>Points: '
+                           f'{_fmt(points)}<extra></extra>'),
+        ))
+    fig.update_layout(**_fig_layout(
+        height=scaled_height('bars', len(top)),
+        xaxis=dict(rangemode='tozero'),
+        xaxis_title=dict(text='Points', font=LABEL_FONT),
+        yaxis=dict(autorange='reversed', showgrid=False),
+        showlegend=False, bargap=0.35,
+    ))
+    return fig
+
+
+def _bars_chart(values, colours, x_title, hover_unit='points',
+                ref_line=None, ref_label=''):
+    """Horizontal bars for a name -> number mapping, in team colours.
+
+    Shared by the small gap/form charts on this page: the shape of the
+    numbers is the story, so they are drawn, not written out in a table.
+    """
+    if values is None or len(values) == 0:
+        return None
+    fig = go.Figure()
+    for name, value in values.items():
+        fig.add_trace(go.Bar(
+            x=[value], y=[name], orientation='h',
+            marker=dict(color=colours.get(name, TEXT_SECONDARY),
+                        line=dict(width=0)),
+            text=_fmt(value), textposition='outside',
+            textfont=dict(size=11, color=TEXT_SECONDARY),
+            hovertemplate=(f'<b>{esc(name)}</b><br>{hover_unit}: '
+                           f'{_fmt(value)}<extra></extra>'),
+        ))
+    layout = dict(
+        height=scaled_height('bars', len(values)),
+        xaxis=dict(rangemode='tozero'),
+        xaxis_title=dict(text=x_title, font=LABEL_FONT),
+        yaxis=dict(autorange='reversed', showgrid=False),
+        showlegend=False, bargap=0.35,
+    )
+    if ref_line is not None:
+        layout['shapes'] = [dict(
+            type='line', x0=ref_line, x1=ref_line, yref='paper', y0=0, y1=1,
+            line=dict(color=ACCENT, width=1.5, dash='dash'),
+        )]
+        layout['annotations'] = [dict(
+            x=ref_line, yref='paper', y=1.02, text=ref_label,
+            showarrow=False, font=dict(size=10, color=TEXT_SECONDARY),
+        )]
+    fig.update_layout(**_fig_layout(**layout))
+    return fig
+
+
+def _session_timeline(weekend):
+    """The weekend as a timeline: one marker per session at its start time.
+
+    A marker (not a bar) because session durations are not published --
+    the start time is the one honest position on the axis. The exact
+    WIB/UTC start rides in the hover label, and the axis carries the
+    day/hour so the shape of the weekend reads at a glance instead of a
+    column of clock times.
+    """
+    sessions = (weekend or {}).get('sessions') or []
+    if not sessions:
+        return None
+    now = datetime.now(timezone.utc)
+    fig = go.Figure()
+    for item in sessions:
+        start = item.get('start')
+        if start is None:
+            continue
+        times = race_schedule.session_times(start)
+        is_race = str(item.get('type') or '').lower() == 'race'
+        start_utc = start if start.tzinfo is not None else start.replace(
+            tzinfo=timezone.utc)
+        done = start_utc <= now
+        # Race red, upcoming blue, already-run sessions muted.
+        colour = ACCENT if is_race else ('#4388E8' if not done else '#626D7D')
+        label = str(item.get('type') or '')
+        fig.add_trace(go.Scatter(
+            x=[start], y=[label], mode='markers+text',
+            marker=dict(size=13, color=colour,
+                        line=dict(width=1.5, color='rgba(255,255,255,0.6)')),
+            text=[times['wib']], textposition='top center',
+            textfont=dict(size=10,
+                          color=TEXT_SECONDARY if done else '#F4F5F7'),
+            hovertemplate=(f'<b>{esc(label)}</b><br>'
+                           f'{esc(times["wib"])} WIB<br>'
+                           f'{esc(times["utc"])}<extra></extra>'),
+        ))
+    if not fig.data:
+        return None
+    fig.update_layout(**_fig_layout(
+        height=scaled_height('bars', len(sessions)),
+        xaxis=dict(tickformat='%a %H:%M', dtick=6 * 60 * 60 * 1000),
+        yaxis=dict(autorange='reversed', showgrid=False),
+        showlegend=False,
+    ))
+    return fig
+
+
 # ---------------------------------------------------------------------------
 # The page
 # ---------------------------------------------------------------------------
@@ -310,15 +432,23 @@ def _next_race_block(year):
     ui.section(
         'Next race',
         note_text=weekend['name'],
-        hint=('When the weekend starts, in Western Indonesian Time (WIB, UTC+7) '
-              'and in UTC. WIB is the clock most readers of this dashboard use.'))
+        hint=('WIB is the clock most readers of this dashboard use; '
+              'UTC is shown too.'))
 
     if live is not None:
         ui.verdict(
-            f'The {weekend["name"]} weekend is on right now - the sessions '
-            f'listed below are the ones still to come, and results appear here '
-            f'as soon as the weekend is over.',
+            f'The {weekend["name"]} weekend is under way - results follow '
+            f'after each session.',
             label='Live weekend')
+
+    country = str(weekend.get('country') or weekend.get('location') or '')
+    ui.card(
+        f'<div class="f1-racecard">{ui.flag_html(country)}'
+        f'<div><div class="f1-racecard-name">{esc(weekend["name"])}</div>'
+        f'<div class="f1-racecard-meta">'
+        f'{esc(country)} · Round {esc(weekend.get("round") or "—")}</div>'
+        f'</div></div>'
+    )
 
     if session is None:
         ui.caption('Every session on the calendar has already started, so there '
@@ -328,7 +458,7 @@ def _next_race_block(year):
     left = race_schedule.countdown(session['start'], now)
     times = race_schedule.session_times(session['start'])
     ui.kpis([
-        {'label': 'Next session', 'value': session['type'],
+        {'label': 'Next session', 'icon': 'flag', 'value': session['type'],
          'sub': weekend['name'], 'tone': 'accent'},
         {'label': 'Starts in', 'value': left['label'] if left else '-',
          'sub': f'{times["wib"]} WIB', 'tone': 'info'},
@@ -337,18 +467,14 @@ def _next_race_block(year):
          'tone': 'info'},
     ])
 
-    rows = []
-    for item in weekend['sessions']:
-        item_times = race_schedule.session_times(item['start'])
-        rows.append([item['type'],
-                     f'{item_times["wib"]} WIB',
-                     item_times['utc']])
-    ui.data_table(['Session', 'Start (WIB)', 'Start (UTC)'], rows)
-    ui.caption('Session times come from the published calendar. Only sessions '
-               'that have not started yet are counted down above.')
+    fig_timeline = _session_timeline(weekend)
+    if fig_timeline is not None:
+        show_plotly_chart(fig_timeline)
+        ui.caption('Each dot is a session start, in WIB; hover for the exact '
+                   'WIB and UTC time.')
 
 
-def _title_permutations(drv_points, races_left):
+def _title_permutations(drv_points, races_left, driver_teams=None, year=None):
     """Who can still win the title, and what they need - plain arithmetic."""
     rows = title_math.title_clinch_checks(drv_points, races_left)
     if not rows:
@@ -361,17 +487,19 @@ def _title_permutations(drv_points, races_left):
         hint=('The most points still available to one driver, and what each '
               'rival has to do to catch the leader.'))
 
-    table = []
-    for row in rows[:6]:
-        table.append([
-            str(row['position']),
-            row['driver'],
-            f'{row["points"]:,}',
-            f'{row["gap_to_leader"]}' if row['gap_to_leader'] else 'leads',
-            {'value': row['verdict'],
-             'tone': 'good' if row['can_win'] else 'dim'},
-        ])
-    ui.data_table(['#', 'Driver', 'Points', 'Gap', 'What it means'], table)
+    gaps = {row['driver']: row['gap_to_leader'] for row in rows[:6]}
+    teams = driver_teams or {}
+    gap_colours = {
+        row['driver']: (team_colour(teams.get(row['driver'], ''), year)
+                        if row.get('can_win') else '#6B7280')
+        for row in rows[:6]
+    }
+    fig_can = _bars_chart(
+        gaps, gap_colours, 'Points behind the leader',
+        ref_line=max_left, ref_label=f'max still available: {max_left}')
+    if fig_can is not None:
+        show_plotly_chart(fig_can)
+        ui.caption('Dashed line: the most points still available to one driver.')
 
     leader_row = rows[0]
     second_row = rows[1] if len(rows) > 1 else None
@@ -382,11 +510,9 @@ def _title_permutations(drv_points, races_left):
             label='The closest rival')
 
     ui.caption(
-        f'With {races_left} race{"s" if races_left != 1 else ""} left, one '
-        f'driver can still score at most {max_left} points (25 for a win, 1 for '
-        f'the fastest lap; sprint points are not added here). Penalties, '
-        f'disqualifications and countback tie-breaks are not modelled - this is '
-        f'arithmetic, not a forecast. {title_math.ESTIMATED.capitalize()}.')
+        f'Max still available with {races_left} race'
+        f'{"s" if races_left != 1 else ""} left: {max_left} points. '
+        f'{title_math.ESTIMATED.capitalize()} - arithmetic, not a forecast.')
 
 
 def page():
@@ -445,52 +571,57 @@ def page():
     team_gap = team_leader_pts - (int(team_points.iloc[1])
                                   if team_second is not None else 0)
 
-    n_sprints = int(sprint_df['Round'].nunique()) if not sprint_df.empty else 0
-
     # --- 1. the hero band --------------------------------------------------
+    # The band is one sentence; the chart underneath carries the story, so
+    # no paragraph repeats the numbers the bars already show.
     headline = _headline(leader, leader_pts, second, gap, races_completed,
                          races_left, calendar_known)
-    teams_line = (f'{team_leader} lead the teams\' championship with '
-                  f'{_fmt(team_leader_pts)} points')
-    if team_second is not None:
-        teams_line += f', {team_gap} ahead of {team_second}'
-    subline = (f'{teams_line}. {_fmt(total_points)} points have been scored so far, '
-               f'in {races_completed} races'
-               f'{" and " + str(n_sprints) + " sprints" if n_sprints else ""}.')
 
     ui.hero(
         eyebrow=(f'{year} season - {races_completed} of {n_races} races run'
                  if calendar_known else f'{year} season - {races_completed} races run'),
         title='Where the season stands',
         headline=headline,
-        subline=subline,
+        stats=[
+            {'label': 'Leader', 'value': leader,
+             'sub': f'{_fmt(leader_pts)} pts'},
+            {'label': 'Gap to P2', 'value': f'{gap:,} pts' if second else '-',
+             'sub': second or ''},
+            {'label': 'Races left',
+             'value': str(races_left) if calendar_known else '-',
+             'sub': f'of {n_races}' if calendar_known else ''},
+        ],
     )
     # The four numbers live in the tile row below, so they are not repeated
     # inside the band.
     ui.chips([('', 'Results from OpenF1')])
+
+    fig_points = _points_chart(drv_points, driver_teams, year)
+    if fig_points is not None:
+        show_plotly_chart(fig_points)
+        ui.caption('Drivers\' championship points - race and sprint together.')
 
     # --- 2. the next race --------------------------------------------------
     _next_race_block(year)
 
     # --- 2. the tiles ------------------------------------------------------
     ui.kpis([
-        {'label': 'Races completed',
+        {'label': 'Races completed', 'icon': 'flag',
          'value': f'{races_completed}/{n_races}' if calendar_known
                   else str(races_completed),
          'sub': 'Grand Prix run so far', 'tone': 'info'},
-        {'label': 'Season points', 'value': f'{total_points:,}',
-         'sub': 'race + sprint', 'tone': 'accent'},
-        {'label': 'Championship leader', 'value': leader,
+        {'label': 'Season points', 'icon': 'layers',
+         'value': f'{total_points:,}', 'sub': 'race + sprint', 'tone': 'accent'},
+        {'label': 'Championship leader', 'icon': 'crown', 'value': leader,
          'sub': f'{_fmt(leader_pts)} pts', 'tone': 'good'},
-        {'label': 'Constructors leader', 'value': team_leader,
+        {'label': 'Constructors leader', 'icon': 'trophy', 'value': team_leader,
          'sub': f'{_fmt(team_leader_pts)} pts', 'tone': 'good'},
     ])
 
     # --- 3. where the title stands -----------------------------------------
     ui.section('Where the title stands',
                note_text='Points include race and sprint results',
-               hint=glossary_short('points'))
-    ui.explain('Points', glossary_long('points'))
+               hint='Each driver and team, ranked by total points.')
 
     left, right = st.columns([1.15, 1])
 
@@ -588,52 +719,66 @@ def page():
 
         with right:
             ui.section('The race in numbers')
-            facts = []
-            if latest_round is not None:
-                facts.append(['Round', f'{latest_round} of {n_races}'
-                              if calendar_known else str(latest_round)])
-            facts.append(['Race', latest_track])
+            tiles = []
             laps = pd.to_numeric(latest.get('Laps'), errors='coerce').max()
-            if pd.notna(laps):
-                facts.append(['Distance', f'{int(laps)} laps'])
             winner = classified.iloc[0] if not classified.empty else None
             if winner is not None:
-                facts.append(['Winner', f'{winner.get("Driver")} '
-                              f'({winner.get("Team", "")})'])
+                tiles.append({'label': 'Winner', 'icon': 'trophy',
+                              'value': str(winner.get('Driver') or '-'),
+                              'sub': str(winner.get('Team', '') or ''),
+                              'tone': 'accent'})
                 grid = winner.get('Starting Grid')
                 if pd.notna(grid):
-                    facts.append(['Started from',
-                                  'pole position (first on the grid)'
-                                  if int(grid) == 1 else f'position {int(grid)}'])
+                    tiles.append({'label': 'Started from',
+                                  'value': ('pole' if int(grid) == 1
+                                            else f'P{int(grid)}'),
+                                  'sub': 'on the grid', 'tone': 'info'})
             runner_up = classified.iloc[1] if len(classified) > 1 else None
             if runner_up is not None:
-                facts.append(['Winning margin',
-                              _margin_text(runner_up.get('GapToLeader'))])
-            facts.append(['Points for the win', str(WIN_POINTS)])
+                tiles.append({'label': 'Winning margin',
+                              'value': _margin_text(
+                                  runner_up.get('GapToLeader')),
+                              'sub': 'to runner-up', 'tone': 'info'})
+            if pd.notna(laps):
+                tiles.append({'label': 'Distance',
+                              'value': f'{int(laps)} laps',
+                              'sub': f'round {latest_round}' if latest_round
+                                     else '', 'tone': 'info'})
+            if tiles:
+                ui.kpis(tiles)
             sprint_rows = (sprint_df[sprint_df['Round'] == latest_round]
                            if latest_round is not None else sprint_df)
             if not sprint_rows.empty:
                 sprint_winner = sprint_rows.sort_values('Position').iloc[0]
-                facts.append(['Saturday sprint',
-                              f'yes - {sprint_winner.get("Driver")} won it'])
+                ui.chips([('Saturday sprint',
+                           f'{sprint_winner.get("Driver")} won it')])
                 ui.explain('Sprint', glossary_short('sprint'))
-            else:
-                facts.append(['Saturday sprint', 'no sprint this weekend'])
-            ui.data_table(['What happened', 'The detail'], facts)
 
     # --- 5. the title fight ------------------------------------------------
     ui.section('The title fight',
                hint='What the gap to the leader means in race wins.')
+    if second is not None:
+        gap_values = {name: int(points) for name, points in
+                      list(drv_points.items())[:6]}
+        leader_pts_val = int(drv_points.iloc[0])
+        gap_values = {name: leader_pts_val - pts
+                      for name, pts in gap_values.items()}
+        gap_colours = {name: team_colour(driver_teams.get(name, ''), year)
+                       for name in gap_values}
+        fig_gap = _bars_chart(
+            gap_values, gap_colours, 'Points behind the leader',
+            ref_line=WIN_POINTS, ref_label=f'one race win: {WIN_POINTS} pts')
+        if fig_gap is not None:
+            show_plotly_chart(fig_gap)
     ui.verdict(_title_fight(leader, gap, second, races_left, calendar_known),
                label='The drivers\' title')
     if team_second is not None:
-        ui.verdict(f'{team_leader} are {team_gap} points ahead of {team_second} '
-                   f'in the teams\' championship. A single race win is worth '
-                   f'{WIN_POINTS} points to a team as well.',
+        ui.verdict(f'{team_leader} lead {team_second} by {team_gap} points '
+                   f'({team_gap // WIN_POINTS} race wins).',
                    label='The teams\' title')
 
     # --- 5b. who can still win it ------------------------------------------
-    _title_permutations(drv_points, races_left)
+    _title_permutations(drv_points, races_left, driver_teams, year)
 
     # --- 6. how the season has gone ----------------------------------------
     ui.section('How the season has gone',
@@ -705,30 +850,25 @@ def page():
             ui.confidence_tag(level)
             level_name = ui.CONFIDENCE_LABELS.get(level, ('', ''))[0].lower()
             ui.estimate_note(
-                f'Recent form is not a forecast. It is the sum of the points '
-                f'scored in the last {len(recent_rounds)} rounds, so it is a '
-                f'short window rather than a whole season. The confidence tag '
-                f'({level_name}) says how small that sample is.')
+                f'Form, not a forecast: the last {len(recent_rounds)} rounds '
+                f'only ({level_name} confidence).')
 
     with right:
         ui.section('Points in the recent rounds')
         if recent.empty:
             ui.empty('No points in the recent rounds yet')
         else:
-            rows = []
-            for position, (driver, points) in enumerate(
-                    recent.head(FORM_SHOWN).items(), start=1):
-                rows.append([
-                    str(position),
-                    driver,
-                    driver_teams.get(driver, ''),
-                    _fmt(points),
-                    _fmt(int(drv_points.get(driver, 0))),
-                ])
-            ui.data_table(['#', 'Driver', 'Team', 'Recent points', 'Season points'],
-                          rows)
-            ui.caption(f'The top {min(FORM_SHOWN, len(recent))} of {len(recent)} '
-                       f'drivers with points in the last {len(recent_rounds)} rounds.')
+            form_colours = {name: team_colour(driver_teams.get(name, ''), year)
+                            for name in recent.head(FORM_SHOWN).index}
+            fig_form = _bars_chart(
+                {name: int(points) for name, points in
+                 recent.head(FORM_SHOWN).items()},
+                form_colours, 'Points in the last '
+                f'{len(recent_rounds)} round{"s" if len(recent_rounds) != 1 else ""}')
+            if fig_form is not None:
+                show_plotly_chart(fig_form)
+            ui.caption(f'Top {min(FORM_SHOWN, len(recent))} of {len(recent)} '
+                       f'drivers, last {len(recent_rounds)} rounds.')
 
     # --- 8. how to read this dashboard -------------------------------------
     ui.section('How to read this dashboard',

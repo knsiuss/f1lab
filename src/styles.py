@@ -13,14 +13,16 @@ one of the things that made the pages feel cluttered.
 """
 
 # Design tokens (mirror assets/style.css)
-BG_PAPER = "rgba(0,0,0,0)"
-BG_PLOT = "rgba(0,0,0,0)"
+# Solid surfaces, not transparency: charts sit on the card surface so the
+# quiet page background never shows *through* a plot.
+BG_PAPER = "#11151C"
+BG_PLOT = "#171D26"
 GRID = "rgba(255,255,255,0.06)"
 GRID_EMPH = "rgba(255,255,255,0.13)"
 ZERO_LINE = "rgba(255,255,255,0.18)"
-TEXT_PRIMARY = "#E8EAF0"
-TEXT_SECONDARY = "#9AA1AE"
-TEXT_DIM = "#6B7280"
+TEXT_PRIMARY = "#F4F5F7"
+TEXT_SECONDARY = "#929BAA"
+TEXT_DIM = "#626D7D"
 ACCENT = "#E10600"
 FONT = "Inter, system-ui, sans-serif"
 TITLE_FONT = dict(family=FONT, size=13, color=TEXT_PRIMARY)
@@ -28,7 +30,7 @@ LABEL_FONT = dict(family=FONT, size=11, color=TEXT_SECONDARY)
 
 # Categorical palette for multi-series charts (colour-blind aware ordering).
 PLOT_PALETTE = [
-    "#4C8DFF", "#3ECF8E", "#FFB020", "#E10600", "#B47CFF",
+    "#4388E8", "#00D2BE", "#FF8700", "#E10600", "#B47CFF",
     "#25C2D9", "#FF7A9A", "#9AA1AE", "#5B8DEF", "#7BD389",
 ]
 
@@ -40,7 +42,40 @@ COMPOUND_COLORS = {
 # Colours for an A-versus-B comparison (the head-to-head page). When the two
 # drivers share a team their livery colours are identical, so the pair falls
 # back to these two, which are far enough apart to tell at a glance.
-COMPARE_COLOURS = ["#4C8DFF", "#FFB020"]
+COMPARE_COLOURS = ["#00D6B5", "#4285F4"]
+
+# Driver colours for the Form tab. These override the team livery colour so
+# teammates stay tellable apart and the colour means the same driver in every
+# chart on the page. Drivers not listed here use their team colour.
+DRIVER_COLORS = {
+    'kimi antonelli': '#00D2BE',
+    'andrea kimi antonelli': '#00D2BE',
+    'antonelli': '#00D2BE',
+    'max verstappen': '#4388E8',
+    'verstappen': '#4388E8',
+    'lewis hamilton': '#E10600',
+    'hamilton': '#E10600',
+    'george russell': '#B47CFF',
+    'russell': '#B47CFF',
+    'charles leclerc': '#FF8700',
+    'leclerc': '#FF8700',
+}
+
+# Heatmap buckets for the Form tab (finishing-position matrix). The order
+# matches ``analysis.HEATMAP_BUCKETS``; DNF/DNS/DSQ/no-entry are distinct
+# treatments, never a position colour.
+HEATMAP_COLORS = [
+    ('p1', '#0E9F8A'),
+    ('p2p3', '#3ECF8E'),
+    ('p4p6', '#7BD389'),
+    ('p7p10', '#F2D16B'),
+    ('p11p15', '#FF8700'),
+    ('p16p20', '#E10600'),
+    ('dnf', '#8A3B3B'),
+    ('dns', '#3A4150'),
+    ('dsq', '#8B5CF6'),
+    ('none', '#1A202B'),
+]
 
 
 def compare_colours(colour_a, colour_b):
@@ -128,7 +163,7 @@ def podium_color(position) -> str:
 def fig_layout(height=None, **overrides):
     """Base Plotly layout -- consistent across every chart.
 
-    The defaults are deliberately quiet: a transparent plot area, thin grid
+    The defaults are deliberately solid: a dark plot card, thin grid
     lines, a top-right horizontal legend and margins that leave room for
     axis labels without wasting space.
 

@@ -26,6 +26,7 @@ Data honesty
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -238,6 +239,123 @@ def race_control(session_key: int) -> pd.DataFrame:
     frame['Date'] = _to_utc(frame['Date'])
     frame = frame.dropna(subset=['Date']).sort_values('Date')
     return frame[CONTROL_COLUMNS].reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Neutralised laps (safety car, virtual safety car, red flag)
+# ---------------------------------------------------------------------------
+
+# Phrases the stewards publish around a neutralisation. Matching is on the
+# upper-cased message, because the feed is not consistent about case.
+_NEUTRALISE_START = {
+    'VSC': ('VIRTUAL SAFETY CAR DEPLOYED', 'VSC DEPLOYED'),
+    'SC': ('SAFETY CAR DEPLOYED',),
+    'RED': ('RED FLAG',),
+}
+_NEUTRALISE_END = {
+    'VSC': ('VIRTUAL SAFETY CAR ENDING', 'VSC ENDING'),
+    'SC': ('SAFETY CAR ENDING', 'SAFETY CAR IN THIS LAP'),
+    'RED': ('RED FLAG ENDED', 'RACE RESUME', 'RESTART'),
+}
+
+NEUTRALISATION_COLUMNS = ['Kind', 'StartLap', 'EndLap', 'Laps', 'Message']
+
+
+def _mentions(message: str, phrases: tuple) -> bool:
+    """True when the message contains one of the phrases as whole words.
+
+    A plain ``in`` test is not enough: "CHEQUERED FLAG" contains "RED FLAG",
+    which would turn the end of the race into a red flag.
+    """
+    return any(re.search(rf'\b{re.escape(phrase)}\b', message)
+               for phrase in phrases)
+
+
+def neutralisations_from_control(control: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Neutralised windows of a session, derived from the steward messages.
+
+    Returns one entry per window with the kind (``VSC``, ``SC`` or ``RED``),
+    the first and last lap the window covers and how many laps that is. A
+    window that never gets a closing message is closed on the last lap the
+    feed mentions, and a red flag with no restart message stays one lap - both
+    are honest bounds, not guesses about the race.
+
+    The input is the frame ``race_control`` returns; passing it in keeps this
+    function pure and testable without a network.
+    """
+    if control is None or control.empty:
+        return []
+    if 'Message' not in control.columns or 'Lap' not in control.columns:
+        return []
+
+    rows = control.copy()
+    rows['Lap'] = pd.to_numeric(rows['Lap'], errors='coerce')
+    if 'Date' in rows.columns:
+        rows = rows.sort_values('Date')
+    rows = rows[rows['Lap'].notna()]
+    if rows.empty:
+        return []
+
+    last_lap = int(rows['Lap'].max())
+    windows: List[Dict[str, Any]] = []
+    open_window: Optional[Dict[str, Any]] = None
+
+    def close(window: Optional[Dict[str, Any]], end_lap: int) -> None:
+        if window is None:
+            return
+        end_lap = max(end_lap, int(window['StartLap']))
+        window['EndLap'] = end_lap
+        window['Laps'] = end_lap - int(window['StartLap']) + 1
+        windows.append(window)
+
+    for _, row in rows.iterrows():
+        message = str(row.get('Message') or '').upper()
+        lap = int(row['Lap'])
+        if not message:
+            continue
+
+        started = None
+        for kind, phrases in _NEUTRALISE_START.items():
+            if _mentions(message, phrases):
+                started = kind
+                break
+        if started:
+            # A red flag ends whatever was open; a second "deployed" of the
+            # same kind is the same window continuing, so it is not restarted.
+            if open_window is not None and open_window['Kind'] != started:
+                close(open_window, lap)
+                open_window = None
+            if open_window is None:
+                open_window = {'Kind': started, 'StartLap': lap, 'Message': message}
+            continue
+
+        if open_window is not None:
+            phrases = _NEUTRALISE_END.get(open_window['Kind'], ())
+            if _mentions(message, phrases):
+                close(open_window, lap)
+                open_window = None
+
+    close(open_window, last_lap)
+    return windows
+
+
+def neutralisations(session_key: Optional[int]) -> List[Dict[str, Any]]:
+    """Neutralised windows of a session (empty list when none was published)."""
+    if not session_key:
+        return []
+    return neutralisations_from_control(race_control(session_key))
+
+
+def neutralised_laps(session_key: Optional[int]) -> set:
+    """Lap numbers driven under a safety car, a VSC or a red flag.
+
+    Those laps are several seconds slower than racing laps, so leaving them in
+    would move a driver's average by more than a tyre's worth of degradation.
+    """
+    laps = set()
+    for window in neutralisations(session_key):
+        laps.update(range(int(window['StartLap']), int(window['EndLap']) + 1))
+    return laps
 
 
 # ---------------------------------------------------------------------------

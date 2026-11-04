@@ -24,7 +24,7 @@ def _pages():
 
 def test_every_page_exists():
     pages = _pages()
-    assert len(pages) == 7, f'expected 7 pages, found {len(pages)}'
+    assert len(pages) == 8, f'expected 8 pages, found {len(pages)}'
 
 
 def test_no_page_uses_a_dataframe():

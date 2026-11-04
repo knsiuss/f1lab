@@ -21,12 +21,28 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import styles
+import wx
 
 # The panel asset, next to the replay player it is styled after.
 TEMPLATE = Path(__file__).parent / 'assets' / 'radar_scope.html'
 
 # The iframe height lives with the other sizes in styles.py.
 HEIGHT = styles.RADAR_HEIGHT
+
+
+def scope_for(track: str, fallback: Optional[str] = None) -> Optional[str]:
+    """The circuit the panel is centred on, or None when neither is known.
+
+    The panel sits inside the weather of the race being read, so it follows
+    that race's circuit. ``fallback`` (the next session's circuit) is only used
+    when the selected race has no published coordinates: centring the map on
+    another event makes the page look like it is showing the wrong country.
+    """
+    if track and wx.coords_for(track):
+        return track
+    if fallback and wx.coords_for(fallback):
+        return fallback
+    return None
 
 
 def radar_html(payload: Dict[str, Any],

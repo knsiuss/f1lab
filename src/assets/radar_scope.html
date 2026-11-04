@@ -93,6 +93,20 @@
   }
   .pill.live { color: var(--good); }
   .pill.stale { color: var(--dim); }
+  .pill.place {
+    max-width: 58%; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; color: var(--dim);
+  }
+
+  .legend {
+    position: absolute; right: 10px; top: 72px; display: flex;
+    flex-direction: column; gap: 4px; padding: 6px 8px;
+    background: rgba(11,13,18,.82); border: 1px solid var(--line);
+    border-radius: 8px; font-size: 10px; color: var(--dim);
+  }
+  .legend .legend-title { color: var(--text); letter-spacing: .06em; }
+  .legend .legend-row { display: flex; align-items: center; gap: 6px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
 
   .zoom {
     position: absolute; right: 10px; top: 10px; display: flex;
@@ -163,12 +177,19 @@
     <svg id="rings" xmlns="http://www.w3.org/2000/svg"></svg>
     <div class="marker" id="marker"><span class="cross"></span><span class="dot"></span></div>
     <div class="hud">
+      <span class="pill place" id="place"></span>
       <span class="pill live" id="pill">LIVE</span>
       <span class="pill" id="zoomPill">zoom 6</span>
     </div>
     <div class="zoom">
       <button type="button" id="zoomIn" aria-label="Zoom in">+</button>
       <button type="button" id="zoomOut" aria-label="Zoom out">&minus;</button>
+    </div>
+    <div class="legend" aria-label="Rain intensity legend">
+      <span class="legend-title">Rain intensity</span>
+      <span class="legend-row"><span class="dot" style="background:#e10600"></span>Heavy</span>
+      <span class="legend-row"><span class="dot" style="background:#f2d16b"></span>Moderate</span>
+      <span class="legend-row"><span class="dot" style="background:#38bdf8"></span>Light</span>
     </div>
     <div class="status" id="status"></div>
   </div>
@@ -209,6 +230,7 @@
   var markerEl = document.getElementById('marker');
   var statusEl = document.getElementById('status');
   var pillEl = document.getElementById('pill');
+  var placeEl = document.getElementById('place');
   var zoomPill = document.getElementById('zoomPill');
   var playEl = document.getElementById('play');
   var scrubEl = document.getElementById('scrub');
@@ -561,6 +583,10 @@
     fail('The radar service did not return a frame, so there is nothing to draw.');
     return;
   }
+
+  // The circuit the view is centred on, so the map can never be mistaken for
+  // somewhere else.
+  if (DATA.track_name) { placeEl.textContent = String(DATA.track_name); }
 
   scrubEl.max = String(FRAMES.length - 1);
   state.frame = FRAMES.length - 1;

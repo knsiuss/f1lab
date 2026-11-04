@@ -42,9 +42,10 @@ from compare import compare_sessions
 from setupfingerprint import fingerprint, normalise_fingerprint, fingerprint_shift
 from pitwindow import pit_window
 from analysis import (
-    compare_driver_pace, count_lead_changes, driver_performance_scores,
+    compare_driver_pace, driver_performance_scores,
     gap_to_leader,
 )
+import race_analysis as ra
 from datetime import timedelta
 
 from styles import (
@@ -60,6 +61,7 @@ import intervals as live_feed
 import ui
 from ui import (
     caption, confidence_tag, data_table, empty, estimate_note, kpis, legend, note, page_header,
+    takeaways,
 )
 
 # How many drivers the analysis views show by default.
@@ -363,6 +365,42 @@ def _session_context(year, race, session_type):
     return SessionContext(session)
 
 
+def _header_actions(year, selected_race, session_type):
+    """Export Report + session status chips (data-source indicator).
+
+    The export is built from the loaded laps only, so the report can never
+    claim a number the page does not show. Status is honest: FastF1 is the
+    official timing archive, OpenF1 is the fallback feed.
+    """
+    cols = st.columns([4, 1])
+    with cols[1]:
+        st.download_button(
+            "Export Report",
+            data=_report_csv(year, selected_race, session_type),
+            file_name=f"F1_{year}_{selected_race.replace(' ', '_')}_{session_type}.csv",
+            mime="text/csv",
+            key="analysis_export",
+        )
+    return cols
+
+
+def _report_csv(year, race, session_type):
+    """Lap-level CSV for the selected session (empty when not loaded)."""
+    try:
+        context = _session_context(year, race, session_type)
+        if context is None or context.laps is None or context.laps.empty:
+            return "no lap data available\n"
+        laps = context.laps.copy()
+        keep = [c for c in ('Driver', 'Team', 'LapNumber', 'LapTime', 'Position',
+                            'Compound', 'TyreLife', 'TrackStatus', 'PitInTime',
+                            'PitOutTime') if c in laps.columns]
+        frame = laps[keep].sort_values(['Driver', 'LapNumber'])
+        frame.insert(0, 'Session', f"{year} {race} {session_type}")
+        return frame.to_csv(index=False)
+    except Exception:
+        return "no lap data available\n"
+
+
 def _body():
     year = st.session_state.get('selected_year', FASTF1_CONFIG.default_year)
 
@@ -387,14 +425,10 @@ def _body():
 
     page_header(
         "Race Analysis",
-        "What the cars did in the session you picked: how fast they went, "
-        "which tyres they ran, who passed whom, where the time was lost and "
-        "what the car was set up like.",
-        # The source is named after the load, not here: the chip used to claim
-        # "FastF1 session data" even when the session had been rebuilt from the
-        # OpenF1 feed.
+        "Dive deep into race data with advanced performance insights.",
         chips=[('season', str(year)), ('', selected_race), ('', session_type)],
     )
+    _header_actions(year, selected_race, session_type)
 
     # -- Session guard --
     try:
@@ -442,7 +476,7 @@ def _body():
             "answering). Two things are missing from that feed: the "
             "race-control flags, so a lap under a safety car is not marked "
             "and may be part of a pace average, and the official running "
-            "order, so the order shown in 'Who passed whom' is estimated from "
+            "order, so the order shown in 'Position Evolution' is estimated from "
             "the lap times and the pit stops.",
             kind='info',
         )
@@ -454,73 +488,105 @@ def _body():
     # tab.open) left the panel blank for a few seconds while the second run
     # arrived, which reads as a broken page. The costly part is the data
     # preparation, and that is cached in SessionContext instead.
-    tabs = st.tabs(["How fast they went", "Tyres and stops",
-                    "Who passed whom", "How the session went",
-                    "Where the time was lost", "How the car was set up",
-                    "Gaps and radio"])
+    tabs = st.tabs(["Position Evolution", "Driver Pace",
+                    "Sector Analysis", "Telemetry",
+                    "Race Context", "Tyres & Stops",
+                    "Setup", "Gaps & Radio"])
 
     with tabs[0]:
-        _tab_pace(context, year)
-
-    with tabs[1]:
-        _tab_strategy(context, year)
-
-    with tabs[2]:
         _tab_battles(context, year)
 
-    with tabs[3]:
-        _tab_insights(context, year)
+    with tabs[1]:
+        _tab_pace(context, year)
 
-    with tabs[4]:
+    with tabs[2]:
         _tab_sector_compare(laps, selected_race, year, session_type)
 
+    with tabs[3]:
+        _tab_telemetry(context, year, selected_race, session_type)
+
+    with tabs[4]:
+        _tab_insights(context, year)
+
     with tabs[5]:
-        _tab_setup_aero(year, selected_race, session_type)
+        _tab_strategy(context, year)
 
     with tabs[6]:
+        _tab_setup_aero(year, selected_race, session_type)
+
+    with tabs[7]:
         _tab_feed(context)
 
 
 # KPI ROW
 def _render_kpi_row(context):
-    """The session headline numbers. All measured, none estimated."""
+    """The six session headline numbers. All measured, none estimated."""
     laps = context.laps
     total_laps = int(laps['LapNumber'].nunique())
+    leader_laps_total = 0
+    try:
+        leader_laps_total = int(
+            laps.groupby('Driver')['LapNumber'].max().max())
+    except Exception:
+        leader_laps_total = total_laps
 
     fastest_row = laps.loc[laps['LapTime'].idxmin()]
     fastest_drv = fastest_row.get('Driver', 'N/A')
     fastest_time = format_f1_time(fastest_row['LapTime'])
+    fastest_lap_no = fastest_row.get('LapNumber', '')
+    fastest_team = str(fastest_row.get('Team', '') or '')
 
+    leader_drv = '-'
+    leader_team = ''
     if 'Position' in laps.columns:
         pos = pd.to_numeric(laps['Position'], errors='coerce')
         leader_laps = laps[pos == 1]
         if not leader_laps.empty:
             leader_drv = leader_laps['Driver'].mode().iloc[0]
-        else:
-            leader_drv = '-'
-    else:
-        leader_drv = '-'
-
-    # Lead changes are counted in lap order. FastF1 groups the lap table by
-    # driver, so counting the transitions of the driver-grouped leader
-    # sequence can only ever report "distinct leaders - 1" and misses a
-    # driver who takes the lead back.
-    lead_changes = count_lead_changes(laps)
+            leader_team = str(leader_laps['Team'].iloc[0]) \
+                if 'Team' in leader_laps.columns else ''
 
     pit_stops = context.pit_stops
     pit_count = len(pit_stops) if pit_stops is not None and not pit_stops.empty else 0
+    pit_drivers = 0
+    if pit_stops is not None and not pit_stops.empty and 'Driver' in pit_stops.columns:
+        pit_drivers = int(pit_stops['Driver'].nunique())
+
+    position_changes = 0
+    classified = 0
+    total_steps = 0
+    if 'Position' in laps.columns:
+        for _driver, group in laps.groupby('Driver'):
+            group = group.sort_values('LapNumber')
+            positions = pd.to_numeric(group['Position'], errors='coerce')
+            steps = positions.diff().fillna(0) != 0
+            position_changes += int(steps.sum())
+            total_steps += int(positions.notna().sum())
+            if positions.notna().any():
+                classified += 1
+    starters = int(laps['Driver'].nunique()) if 'Driver' in laps.columns else classified
+    pct_changes = (position_changes / total_steps * 100) if total_steps else 0.0
 
     kpis([
-        {'label': 'Total laps', 'value': str(total_laps), 'sub': 'in this session',
-         'tone': ''},
-        {'label': 'Fastest lap', 'value': fastest_time, 'sub': str(fastest_drv),
-         'tone': 'accent'},
-        {'label': 'Race leader', 'value': str(leader_drv), 'sub': 'most laps led',
-         'tone': 'good'},
-        {'label': 'Lead changes', 'value': str(lead_changes),
-         'sub': 'times the lead changed hands', 'tone': ''},
-        {'label': 'Pit stops', 'value': str(pit_count), 'sub': 'field total',
-         'tone': ''},
+        {'label': 'Total laps', 'value': str(total_laps),
+         'sub': f"leader completed {leader_laps_total}", 'tone': '',
+         'icon': 'flag'},
+        {'label': 'Fastest lap', 'value': fastest_time,
+         'sub': f"{fastest_drv} · Lap {fastest_lap_no}"
+                + (f" · {fastest_team}" if fastest_team else ''),
+         'tone': 'accent', 'icon': 'activity'},
+        {'label': 'Race leader', 'value': str(leader_drv),
+         'sub': leader_team or 'most laps led', 'tone': 'good',
+         'icon': 'target'},
+        {'label': 'Position changes', 'value': str(position_changes),
+         'sub': f"{pct_changes:.0f}% of recorded steps", 'tone': '',
+         'icon': 'chart'},
+        {'label': 'Pit stops', 'value': str(pit_count),
+         'sub': f"{pit_drivers} drivers stopped", 'tone': '',
+         'icon': 'trend-up'},
+        {'label': 'Classified', 'value': f"{classified}/{starters}",
+         'sub': 'classified / starters', 'tone': 'info',
+         'icon': 'trend-down'},
     ])
 
 
@@ -649,6 +715,40 @@ def _tab_pace(context, year):
         "the crossed markers are pit stops. These are raw lap times, so a "
         "pit lap is included — the comparisons below use clean laps only."
     )
+
+    # -- Export + pace distribution --
+    export_laps = laps[laps['Driver'].isin(selected)].copy()
+    if not export_laps.empty:
+        st.download_button(
+            "Export lap times (CSV)", export_laps.to_csv(index=False),
+            file_name="lap_times.csv", mime="text/csv", key="pace_csv")
+
+    ui.section("Race pace distribution", "estimated — clean laps only",
+            hint="How steady each driver's pace was: the box spans the "
+                 "middle half of their clean laps, the line is the median.")
+    dist = ra.pace_distribution(laps)
+    if not dist.empty:
+        clean = clean_laps_for_analysis(laps)
+        fig_box = go.Figure()
+        for index, driver in enumerate(selected):
+            times = clean[clean['Driver'] == driver]['LapTime_s'].dropna()
+            if times.empty:
+                continue
+            fig_box.add_trace(go.Box(
+                y=times, name=driver, boxpoints='outliers',
+                marker_color=PLOT_PALETTE[index % len(PLOT_PALETTE)],
+                line_color=PLOT_PALETTE[index % len(PLOT_PALETTE)],
+            ))
+        fig_box.update_layout(**_fig_layout(height=chart_height('block'),
+            yaxis_title=dict(text="Clean lap time (s)", font=LABEL_FONT),
+        ))
+        show_plotly_chart(fig_box)
+        rows = [[row['Driver'], _num(row['Median_s'], 3),
+                 _num(row['Mean_s'], 3), _num(row['Std_s'], 3),
+                 str(int(row['Outliers'])), str(int(row['Laps']))]
+                for _, row in dist.iterrows() if row['Driver'] in selected]
+        data_table(['Driver', 'Median (s)', 'Mean (s)', 'Std dev (s)',
+                    'Outliers', 'Clean laps'], rows)
 
     # -- Fastest laps table --
     ui.section("Fastest laps", "measured",
@@ -846,6 +946,49 @@ def _tab_pace(context, year):
             rows,
         )
 
+    # -- Pace consistency: std of clean laps (lower = more consistent) --
+    ui.section("Pace consistency", "estimated — clean laps only",
+            hint="Standard deviation of each driver's clean lap times. "
+                 "Lower means steadier, not faster.")
+    try:
+        clean = context.clean_laps
+        if clean is not None and not clean.empty:
+            stats = clean.copy()
+            stats['LapTime_s'] = pd.to_timedelta(
+                stats['LapTime']).dt.total_seconds()
+            stats = stats.dropna(subset=['LapTime_s'])
+            rows_stats = []
+            for drv, grp in stats.groupby('Driver'):
+                vals = grp['LapTime_s']
+                rows_stats.append({
+                    'Driver': drv, 'N': int(len(vals)),
+                    'Std': float(vals.std()) if len(vals) > 1 else 0.0,
+                    'Mean': float(vals.mean()),
+                    'Median': float(vals.median()),
+                })
+            if rows_stats:
+                cdf = pd.DataFrame(rows_stats).sort_values('Std')
+                fig_c = go.Figure(go.Bar(
+                    x=cdf['Driver'], y=cdf['Std'],
+                    marker_color=PLOT_PALETTE[0], marker_line_width=0,
+                    hovertemplate='<b>%{x}</b><br>Std: %{y:.3f}s'
+                                  '<extra></extra>'))
+                fig_c.update_layout(**_fig_layout(
+                    height=chart_height('row'),
+                    yaxis_title=dict(text='Std dev of clean laps (s)',
+                                     font=LABEL_FONT)))
+                show_plotly_chart(fig_c)
+                rows = [[r['Driver'], str(r['N']),
+                         _num(r['Std'], 3), _num(r['Mean'], 3),
+                         _num(r['Median'], 3)]
+                        for _, r in cdf.iterrows()]
+                data_table(['Driver (most consistent first)', 'Clean laps',
+                            'Std dev (s)', 'Mean (s)', 'Median (s)'], rows)
+                caption("Consistency is steadiness of lap times, not outright "
+                        "speed: the fastest driver can be the least consistent.")
+    except Exception:
+        empty("Pace consistency unavailable")
+
 
 # TAB 2: STRATEGY & STINTS
 @st.fragment
@@ -992,6 +1135,29 @@ def _tab_strategy(context, year):
             yaxis_title=dict(text="Pit Time (s)", font=LABEL_FONT),
         ))
         show_plotly_chart(fig_pit)
+
+        pit_table = ra.pit_summary(pit_filtered)
+        if pit_table.get('status') == 'Available':
+            caption(
+                f"Pit summary: {pit_table['total']} stops, average "
+                f"{pit_table['average_s']:.1f}s, fastest "
+                f"{pit_table['fastest_s']:.1f}s"
+                + (f", window laps {pit_table['window'][0]}-"
+                   f"{pit_table['window'][1]}." if pit_table.get('window')
+                   else "."))
+
+    ui.section("Tyre degradation per stint", "estimated — clean laps",
+            hint="The fitted lap-time slope of each stint (seconds per "
+                 "lap). Traffic, fuel load and safety cars are not "
+                 "controlled for, so read this as a wear proxy, not a "
+                 "pure tyre measurement.")
+    slopes = ra.degradation_slope(laps)
+    if not slopes.empty:
+        rows = [[row['Driver'], str(int(row['Stint'])),
+                 str(int(row['Laps'])), _num(row['Slope_s_per_lap'], 3)]
+                for _, row in slopes.sort_values(
+                    'Slope_s_per_lap', ascending=False).iterrows()]
+        data_table(['Driver', 'Stint', 'Laps', 'Slope (s/lap)'], rows)
 
     # -- Strategy simulator --
     ui.section("What a different plan would have cost",
@@ -1278,15 +1444,38 @@ def _tab_battles(context, year):
         color_map[d] = team_colour(team, year)
 
     all_drivers = sorted(pos_df['Driver'].unique())
-    pos_drivers = st.multiselect(
-        "Drivers", all_drivers,
-        default=_quickest_drivers(laps, DEFAULT_DRIVERS),
-        max_selections=10, key="pos_drv",
-    )
+    view = st.radio("Show", ["All drivers", "Top 3", "Top 5", "Custom"],
+                    horizontal=True, key="pos_view")
+    if view == "All drivers":
+        pos_drivers = all_drivers
+        caption(f"Showing all {len(all_drivers)} drivers.")
+    elif view == "Top 3":
+        pos_drivers = _quickest_drivers(laps, 3)
+    elif view == "Top 5":
+        pos_drivers = _quickest_drivers(laps, 5)
+    else:
+        # A saved selection from an earlier session (or a wider field) can
+        # exceed max_selections and crash the widget on creation, so the
+        # saved state is clamped before the widget exists.
+        _saved = st.session_state.get("pos_drv")
+        if _saved is not None and len(_saved) > 10:
+            st.session_state["pos_drv"] = list(_saved)[:10]
+        pos_drivers = st.multiselect(
+            "Drivers", all_drivers,
+            default=_quickest_drivers(laps, DEFAULT_DRIVERS),
+            max_selections=10, key="pos_drv",
+        )
 
     if not pos_drivers:
         empty("No drivers selected")
         return
+
+    gains = []
+    for driver, group in pos_df.groupby('Driver'):
+        group = group.sort_values('Lap')
+        if len(group) >= 2:
+            gains.append((driver, int(group['Position'].iloc[0] - group['Position'].iloc[-1])))
+    biggest_gain = max(gains, key=lambda item: item[1]) if gains else None
 
     kpis([
         {'label': 'Drivers shown', 'value': str(len(pos_drivers)),
@@ -1295,6 +1484,10 @@ def _tab_battles(context, year):
          'sub': 'in this session', 'tone': 'info'},
         {'label': 'Leaders', 'value': str(int(pos_df['Position'].min())),
          'sub': 'best position held', 'tone': 'accent'},
+        {'label': 'Biggest gain', 'value': biggest_gain[0] if biggest_gain else '—',
+         'sub': (f"+{biggest_gain[1]} places, start to finish"
+                 if biggest_gain and biggest_gain[1] > 0 else 'no net gain'),
+         'tone': 'good'},
     ])
 
     fig_pos = go.Figure()
@@ -1327,8 +1520,56 @@ def _tab_battles(context, year):
                    tickmode='linear', tick0=1, dtick=1,  gridwidth=2,
                    zeroline=False), yaxis_title=dict(text="Position", font=LABEL_FONT),
         hovermode='x unified'))
+    # Safety Car / VSC / Red Flag annotations — only from real race-control
+    # messages; the OpenF1 fallback has none, so nothing is invented.
+    try:
+        rc = get_race_control_messages(context.session)
+        if rc is not None and not rc.empty:
+            shapes = []
+            for _, r in rc.iterrows():
+                try:
+                    lap_no = int(r.get('Lap'))
+                except (TypeError, ValueError):
+                    continue
+                msg = str(r.get('Message', '') or '')
+                flag = str(r.get('Flag', '') or '')
+                if 'RED' in flag.upper() or 'red flag' in msg.lower():
+                    colour, label = 'rgba(225,6,0,0.18)', 'Red Flag'
+                elif 'virtual' in msg.lower():
+                    colour, label = 'rgba(255,215,0,0.15)', 'VSC'
+                elif 'safety car' in msg.lower() or 'YELLOW' in flag.upper():
+                    colour, label = 'rgba(255,135,0,0.15)', 'Safety Car'
+                else:
+                    continue
+                shapes.append(dict(type='rect', x0=lap_no, x1=lap_no + 1,
+                                   y0=0, y1=22, fillcolor=colour,
+                                   line_width=0, layer='below'))
+                fig_pos.add_annotation(
+                    x=lap_no, y=1.2, text=label, showarrow=False,
+                    font=dict(size=9, color='#F4F5F7'))
+            if shapes:
+                fig_pos.update_layout(shapes=shapes)
+    except Exception:
+        pass
     show_plotly_chart(fig_pos)
-    caption("Crossed markers are pit stops.")
+    caption("Crossed markers are pit stops. Tinted bands are Safety Car / "
+            "VSC / Red Flag periods from race control (only when published).")
+
+    ui.section("Position gain and loss", "measured — start vs final",
+            hint="Places gained (positive) or lost (negative) between "
+                 "the first and last recorded position of each driver. "
+                 "A gain alone does not prove an overtake: pit stops "
+                 "also move positions.")
+    changes = ra.position_changes(laps)
+    if not changes.empty:
+        rows = [[row['Driver'], str(int(row['Start'])),
+                 str(int(row['Final'])),
+                 {'value': f"{int(row['Gain']):+d}",
+                  'tone': 'good' if row['Gain'] > 0
+                  else 'bad' if row['Gain'] < 0 else ''}]
+                for _, row in changes.sort_values('Gain',
+                                                  ascending=False).iterrows()]
+        data_table(['Driver', 'Start', 'Final', 'Gain'], rows)
 
     ui.section("Gap to leader", "measured — cumulative lap time",
             hint="How far behind the reference driver each car was, in "
@@ -1339,6 +1580,9 @@ def _tab_battles(context, year):
     # Default: skip the drivers already shown in Position Evolution and show
     # the next quickest ones.
     gap_default = _quickest_drivers(laps, DEFAULT_DRIVERS + 4)[DEFAULT_DRIVERS:]
+    _saved_gap = st.session_state.get("gap_drv")
+    if _saved_gap is not None and len(_saved_gap) > 10:
+        st.session_state["gap_drv"] = list(_saved_gap)[:10]
     gap_drivers = st.multiselect("Drivers", drivers_list,
                                  default=gap_default,
                                  max_selections=10, key="gap_drv")
@@ -1382,6 +1626,34 @@ def _tab_battles(context, year):
                 f"The gap is only plotted for laps the reference driver actually "
                 f"completed."
             )
+            gap_table = ra.gap_stats(gap_frame)
+            if not gap_table.empty:
+                # Lapped status: laps completed vs the reference driver.
+                try:
+                    ref_laps = int(
+                        laps[laps['Driver'] == leader_name]['LapNumber']
+                        .max())
+                except Exception:
+                    ref_laps = 0
+                rows = []
+                for _, row in gap_table.iterrows():
+                    drv = row['Driver']
+                    try:
+                        drv_laps = int(
+                            laps[laps['Driver'] == drv]['LapNumber'].max())
+                        laps_down = ref_laps - drv_laps
+                        status = (f"Lapped +{laps_down}" if laps_down > 0
+                                  else "Same lap")
+                    except Exception:
+                        status = "Unknown"
+                    rows.append([drv, _num(row['LargestGap_s'], 2),
+                                 _num(row['SmallestGap_s'], 2),
+                                 _num(row['FinalGap_s'], 2),
+                                 _num(row['ClosingRate_s_per_lap'], 3),
+                                 status])
+                data_table(['Driver', 'Largest gap (s)', 'Smallest gap (s)',
+                            'Final gap (s)', 'Closing rate (s/lap)',
+                            'Lapped status'], rows)
 
     ui.section("Which of the two was quicker", "estimated — clean laps only",
             hint="A lap-by-lap comparison of two drivers on their clean "
@@ -1492,6 +1764,18 @@ def _tab_insights(context, year):
         "into one score per driver, then looks at how fast the tyres wore "
         "out and at what the officials said during the session."
     )
+
+    ui.section("Automated key insights", "deterministic — rule based",
+            hint="Findings computed from this session's laps, each with "
+                 "the numbers behind it. Nothing is narrated by hand.")
+    found = ra.automated_insights(laps, context.pit_stops)
+    if found:
+        takeaways([(item['title'],
+                    f"{item['text']} (Evidence: {item['evidence']}.)")
+                   for item in found])
+    else:
+        empty("No insights could be derived from this session.",
+              "The session needs timed laps before insights can be computed.")
 
     ui.section("Driver performance scores", "estimated — clean laps only",
             hint="One number per driver, built from how fast they went, how "
@@ -1881,6 +2165,49 @@ def _tab_insights(context, year):
     except Exception as e:
         empty("Race control data unavailable", str(e))
 
+    ui.section("Event timeline", "measured — race control + pit stops",
+            hint="Safety Car, VSC, Red Flag, pit stops and retirements "
+                 "in lap order. No radio text is invented.")
+    try:
+        events = []
+        try:
+            rc_tl = get_race_control_messages(session)
+            if rc_tl is not None and not rc_tl.empty:
+                for _, r in rc_tl.iterrows():
+                    try:
+                        lap_no = int(r.get('Lap'))
+                    except (TypeError, ValueError):
+                        continue
+                    msg = str(r.get('Message', '') or '')
+                    if any(k in msg.lower() for k in
+                           ('safety car', 'virtual', 'red flag', 'restart',
+                            'retir', 'dnf', 'dsq')):
+                        events.append((lap_no, str(r.get('Time', '')),
+                                       'Race control', msg))
+        except Exception:
+            pass
+        try:
+            ps = context.pit_stops
+            if ps is not None and not ps.empty and 'Lap' in ps.columns:
+                for _, r in ps.iterrows():
+                    try:
+                        lap_no = int(r.get('Lap'))
+                    except (TypeError, ValueError):
+                        continue
+                    events.append((lap_no, '', 'Pit stop',
+                                   str(r.get('Driver', ''))))
+        except Exception:
+            pass
+        if events:
+            events.sort(key=lambda e: e[0])
+            data_table(['Lap', 'Time', 'Type', 'Event'],
+                       [[f"L{e[0]}", e[1] or '-', e[2], e[3]]
+                        for e in events])
+        else:
+            empty("No timeline events published for this session")
+    except Exception as e:
+        empty("Event timeline unavailable", str(e))
+
 
 # TAB 5: SECTOR & SESSIONS
 @st.fragment
@@ -1927,14 +2254,27 @@ def _render_sector_insights(laps):
         return
 
     sector_columns = [s for s in ("Sector1", "Sector2", "Sector3") if s in laps.columns]
+    # Three sector spotlight cards: fastest driver per sector (clean laps).
+    sector_cards = []
+    for idx, col in enumerate(sector_columns, start=1):
+        key = f"Sector{idx}Best"
+        if key in summary.columns and 'Driver' in summary.columns:
+            best_row = summary.sort_values(key).iloc[0]
+            sector_cards.append({
+                'label': f'Sector {idx}',
+                'value': str(best_row['Driver']),
+                'sub': f"{float(best_row[key]):.3f}s best · "
+                       f"mean {float(best_row.get(f'Sector{idx}Mean', 0)):.3f}s",
+                'tone': 'accent' if idx == 1 else '',
+                'icon': 'chart',
+            })
+    if sector_cards:
+        kpis(sector_cards)
     kpis([
         {'label': 'Drivers with sectors', 'value': str(len(summary)),
          'sub': 'clean laps only', 'tone': ''},
         {'label': 'Sectors per lap', 'value': str(len(sector_columns)),
          'sub': 'timed in this session', 'tone': 'info'},
-        {'label': 'Fastest sector 1',
-         'value': str(summary['Driver'].iloc[0]) if 'Driver' in summary.columns else 'n/a',
-         'sub': 'best sector 1 time', 'tone': 'accent'},
     ])
 
     c_left, c_right = st.columns(2)
@@ -1971,6 +2311,34 @@ def _render_sector_insights(laps):
         "estimate with caution."
     )
     ui.verdict(_sector_verdict(summary, deficits))
+
+    # Multi-line sector comparison: best sector time per driver (selectable).
+    ui.section("Sector time comparison",
+            "estimated — clean laps only",
+            hint="Best sector time per driver, one line per selected driver. "
+                 "Lower is quicker in that third.")
+    sector_drivers = st.multiselect(
+        "Drivers", summary['Driver'].tolist(),
+        default=summary['Driver'].head(3).tolist(),
+        max_selections=6, key="sector_drv")
+    if sector_drivers:
+        fig_s = go.Figure()
+        for index, drv in enumerate(sector_drivers):
+            row = summary[summary['Driver'] == drv].iloc[0]
+            xs, ys = [], []
+            for idx in range(1, len(sector_columns) + 1):
+                key = f"Sector{idx}Best"
+                if key in summary.columns and pd.notna(row.get(key)):
+                    xs.append(f"Sector {idx}")
+                    ys.append(float(row[key]))
+            fig_s.add_trace(go.Scatter(
+                x=xs, y=ys, mode='lines+markers', name=drv,
+                line=dict(color=PLOT_PALETTE[index % len(PLOT_PALETTE)],
+                          width=2.5),
+                marker=dict(size=8)))
+        fig_s.update_layout(**_fig_layout(height=chart_height('row'),
+            yaxis_title=dict(text='Best sector time (s)', font=LABEL_FONT)))
+        show_plotly_chart(fig_s)
 
 
 def _render_session_compare(laps, race_name, year, session_type):
@@ -2269,6 +2637,179 @@ def _clock(value):
         return '-'
 
 
+@st.cache_resource(ttl=STREAMLIT_CONFIG.session_cache_ttl,
+                  show_spinner=False)
+def _cached_telemetry_session(year, race, session_type='Race'):
+    """Session loaded **with** car telemetry (cached).
+
+    Telemetry is the largest download in the app, so the tab only
+    reaches this function after the reader presses its load button.
+    Returns ``None`` when the session cannot be loaded.
+    """
+    setup_fastf1_cache()
+    return load_fastf1_session(year, race, session_type,
+                               load_telemetry=True)
+
+
+def _car_data_for_lap(session, laps, driver, lap_number=None):
+    """Car telemetry frame for one driver's lap (or ``None``).
+
+    ``lap_number=None`` picks the driver's fastest timed lap. The
+    frame carries ``Distance`` (added when FastF1 did not provide it)
+    so traces can be aligned by circuit distance downstream.
+    """
+    if session is None or laps is None or laps.empty:
+        return None
+    sub = laps[(laps['Driver'] == driver) & laps['LapTime'].notna()]
+    if lap_number is not None and 'LapNumber' in sub.columns:
+        sub = sub[sub['LapNumber'] == lap_number]
+    if sub.empty:
+        return None
+    lap = sub.loc[sub['LapTime'].idxmin()]
+    try:
+        car = lap.get_car_data()
+    except Exception:
+        return None
+    if car is None or car.empty:
+        return None
+    if 'Distance' not in car.columns:
+        try:
+            car = car.add_distance()
+        except Exception:
+            return None
+    return car
+
+
+@st.fragment
+def _tab_telemetry(context, year, selected_race, session_type='Race'):
+    """Telemetry comparison: drivers aligned by circuit distance."""
+    laps = context.laps
+    note(
+        "This tab answers 'how did they drive the lap?'. It compares "
+        "the car's own telemetry - speed, pedals, gear, revs and DRS - "
+        "of two or more drivers on the same lap, aligned by distance "
+        "around the circuit."
+    )
+    ui.section("Telemetry comparison",
+            "measured — car telemetry, opt-in download",
+            hint="One chart per variable; every driver is resampled "
+                 "onto the same distance grid, so the lines line up "
+                 "corner by corner.")
+
+    ready = st.session_state.get('telemetry_loaded', False)
+    if not ready:
+        note(
+            "Car telemetry is the largest download in the app, so it is "
+            "never loaded automatically: press the button and the "
+            "session is cached for the rest of the visit.",
+            kind='info')
+        if st.button('Load the telemetry', key='load_telemetry',
+                     type='primary'):
+            st.session_state.telemetry_loaded = True
+            st.rerun()
+        return
+
+    with st.spinner('Loading the car telemetry (the first load takes a '
+                    'minute)...'):
+        session = _cached_telemetry_session(year, selected_race,
+                                            session_type)
+    if session is None or not hasattr(session, 'car_data'):
+        empty("Car telemetry not available for this session.",
+              "The OpenF1 fallback feed does not publish car telemetry, "
+              "so this comparison needs the official timing archive.")
+        return
+
+    drivers = sorted(laps['Driver'].dropna().unique())
+    selected = st.multiselect(
+        "Drivers", drivers,
+        default=_quickest_drivers(laps, DEFAULT_DRIVERS),
+        max_selections=6, key="tel_drv")
+    if not selected:
+        empty("Pick at least one driver.",
+              "The telemetry chart needs one or more drivers to compare.")
+        return
+
+    max_lap = int(pd.to_numeric(laps.get('LapNumber'), errors='coerce')
+                  .max() or 0)
+    lap_choice = st.selectbox(
+        "Lap", ["Fastest lap"] + list(range(1, max_lap + 1)),
+        key="tel_lap")
+    lap_number = None if lap_choice == "Fastest lap" else int(lap_choice)
+
+    frames = {}
+    for driver in selected:
+        car = _car_data_for_lap(session, laps, driver, lap_number)
+        if car is not None:
+            frames[driver] = car
+    if not frames:
+        empty("No car telemetry for the selected drivers and lap.",
+              "Try another lap - some laps have no telemetry samples.")
+        return
+    missing = [d for d in selected if d not in frames]
+    if missing:
+        note(f"No telemetry for: {', '.join(missing)}.", kind='warn')
+
+    aligned = ra.align_telemetry(frames)
+    variable = st.radio(
+        "Variable", ["Speed", "Throttle", "Brake", "Gear", "RPM", "DRS"],
+        horizontal=True, key="tel_var")
+    units = {"Speed": "km/h", "Throttle": "%", "Brake": "%",
+             "Gear": "gear", "RPM": "rpm", "DRS": "state"}
+    fig = go.Figure()
+    for index, driver in enumerate(frames):
+        trace = aligned[driver]
+        fig.add_trace(go.Scatter(
+            x=trace['Distance'], y=trace[variable], name=driver,
+            mode='lines',
+            line=dict(color=PLOT_PALETTE[index % len(PLOT_PALETTE)],
+                      width=2),
+            hovertemplate=(f"<b>{driver}</b><br>%{{x:.0f}} m<br>"
+                           f"%{{y:.1f}} {units[variable]}<extra></extra>"),
+        ))
+    fig.update_layout(**_fig_layout(
+        height=chart_height('feature'),
+        xaxis_title=dict(text="Distance around the lap (m)",
+                         font=LABEL_FONT),
+        yaxis_title=dict(text=f"{variable} ({units[variable]})",
+                         font=LABEL_FONT),
+    ))
+    show_plotly_chart(fig)
+    caption("Aligned by circuit distance, not by time: each line is the "
+            "same metres of track.")
+
+    ui.section("Telemetry summary",
+            "measured — the aligned lap",
+            hint="Top and average speed plus how many braking points "
+                 "the lap held, per driver.")
+    rows = []
+    for driver, trace in aligned.items():
+        summary = ra.telemetry_summary(trace)
+        drs_open = '-'
+        try:
+            drs = trace.get('DRS')
+            if drs is not None and len(drs):
+                import numpy as _np
+                drs_open = f"{float(_np.mean(_np.asarray(drs) >= 10)) * 100:.0f}%"
+        except Exception:
+            drs_open = '-'
+        rows.append([driver, _num(summary.get('max_speed'), 1),
+                     _num(summary.get('avg_speed'), 1),
+                     str(summary.get('braking_points', '-')),
+                     drs_open])
+    data_table(['Driver', 'Max speed (km/h)', 'Average speed (km/h)',
+                'Braking points', 'DRS open'], rows)
+    caption("Braking points = where the brake goes off→on. DRS open = share "
+            "of samples with DRS state ≥10 (10–12 = open in FastF1). "
+            "No circuit map is drawn: FastF1 publishes no track outline "
+            "in the lap table, so it is not invented.")
+    with st.expander('How to read this chart'):
+        st.write(
+            "Braking points are counted where the brake goes from off "
+            "to on. DRS reads 0-12 (0 closed, 10-12 open) in FastF1 "
+            "telemetry. A gap in a line means that driver has no "
+            "telemetry samples there - it is not interpolated.")
+
+
 @st.fragment
 def _tab_feed(context):
     """The live feeds: the gaps between the cars, the radio, the stewards."""
@@ -2395,10 +2936,10 @@ def page():
     _body()
 
     ui.steps([
-        "Pick the race and the session at the top. The seven tabs are the "
-        "seven questions: how fast were the cars, which tyres did they run, "
-        "who passed whom, how did the session go, where was the time lost, "
-        "what was the car set up like, and what did the live feeds say.",
+        "Pick the season, Grand Prix and session at the top. The eight tabs "
+        "are the analytical views: Position Evolution (with Gap to Leader), "
+        "Driver Pace, Sector Analysis, Telemetry, Race Context, Tyres & "
+        "Stops, Setup and Gaps & Radio.",
         "A clean lap is a lap that can be compared with another lap: the car "
         "was on track, the track was green and the timing was reliable. "
         "Everything that is estimated uses only clean laps.",

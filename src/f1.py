@@ -38,6 +38,7 @@ PAGES = [
     ("Analysis Center", "pages/6_Analysis.py", ":material/monitoring:"),
     ("Competitor Analysis", "pages/7_Competitor.py", ":material/person_search:"),
     ("Race Replay", "pages/5_Replay.py", ":material/play_circle:"),
+    ("Tyre Strategy", "pages/8_TyreStrategy.py", ":material/adjust:"),
 ]
 
 # Ensure directories exist, then setup cache
@@ -92,17 +93,17 @@ def main():
                          help='Show or hide the page menu'):
                 st.session_state.nav_open = not st.session_state.get('nav_open', True)
         with brand_col:
-            st.markdown("""
-            <div style="padding:.1rem 0 .7rem;">
-              <div style="font-family:'Outfit',sans-serif;font-size:1.25rem;font-weight:700;
-                          color:#E8EAF0;letter-spacing:.06em;">F1 LAB</div>
-              <div style="font-size:.68rem;color:#6B7280;letter-spacing:.14em;
-                          text-transform:uppercase;margin-top:.1rem;">
-                Public data analytics</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(
+                '<div class="f1-brand">'
+                '<div class="f1-brand-text">'
+                '<div class="f1-brand-name">F1 LAB</div>'
+                '<div class="f1-brand-sub">Public data analytics</div>'
+                '</div></div>',
+                unsafe_allow_html=True,
+            )
 
         # --- navigation (the menu the hamburger opens) -------------------------
+        st.markdown('<div class="f1-side-label">Menu</div>', unsafe_allow_html=True)
         if st.session_state.get('nav_open', True):
             for (title, _path, _icon), page_object in zip(PAGES, page_objects):
                 st.page_link(page_object, label=title, icon=_icon)
@@ -133,17 +134,27 @@ def main():
                 # The calendar is unreachable: the number of completed races is
                 # unknown, not zero.
                 races_text = f"unknown/{total_races}"
-            st.markdown(f"""
-            <div style="margin:.4rem 0 1rem;padding:.75rem .85rem;border:1px solid rgba(255,255,255,.08);
-                        border-radius:10px;background:rgba(255,255,255,.02);">
-              <div style="display:flex;justify-content:space-between;font-size:.8rem;
-                          color:#9AA1AE;margin-bottom:.35rem;">
-                <span>Races</span><span style="color:#E8EAF0;font-weight:600;">{races_text}</span></div>
-              <div style="display:flex;justify-content:space-between;font-size:.8rem;color:#9AA1AE;">
-                <span>Points</span>
-                <span style="color:#E8EAF0;font-weight:600;">{int(total_all_points):,}</span></div>
-            </div>
-            """, unsafe_allow_html=True)
+            # The bar under the numbers shows how far through the calendar
+            # the season is, so 19/23 reads at a glance. Only when the count
+            # is known -- "unknown/23" gets no bar rather than a wrong one.
+            progress_pct = ''
+            if calendar_is_live(st.session_state.selected_year) and total_races:
+                pct = round(100 * races_done / total_races)
+                progress_pct = (
+                    f'<div class="f1-side-progress">'
+                    f'<div class="f1-side-progress-bar" style="width:{pct}%"></div></div>'
+                )
+            st.markdown(
+                f'<div class="f1-side-stats">'
+                f'<div class="f1-side-stat">'
+                f'<span class="f1-side-stat-label">Races</span>'
+                f'<span class="f1-side-stat-value">{races_text}</span></div>'
+                f'<div class="f1-side-stat">'
+                f'<span class="f1-side-stat-label">Points</span>'
+                f'<span class="f1-side-stat-value">{int(total_all_points):,}</span></div>'
+                f'{progress_pct}</div>',
+                unsafe_allow_html=True,
+            )
 
         # --- the language of the explanation layer ---------------------------
         # Only the glossary and the newcomer guide are translated. The data
@@ -195,17 +206,17 @@ def main():
                 _label = _entry[0]['term'] if _entry else term.title()
                 ui.explain(_label, glossary.long(term, lang=_reader_lang))
 
-        st.markdown("""
-        <div style="font-size:.72rem;color:#6B7280;line-height:1.5;border-top:1px solid rgba(255,255,255,.07);
-                    padding-top:.8rem;margin-top:.3rem;">
-          Results, lap times, sectors, tyres and pit stops from
-          <a href="https://openf1.org/" target="_blank" rel="noopener">OpenF1</a>
-          (CC BY-NC-SA 4.0). Session data from
-          <a href="https://docs.fastf1.dev/" target="_blank" rel="noopener">FastF1</a>
-          where the official timing archive is reachable, otherwise from OpenF1.
-        </div>
-        """, unsafe_allow_html=True)
-        st.caption("Created by **Maxvy**")
+        st.markdown(
+            '<div class="f1-side-foot">'
+            'Results, lap times, sectors, tyres and pit stops from '
+            '<a href="https://openf1.org/" target="_blank" rel="noopener">OpenF1</a> '
+            '(CC BY-NC-SA 4.0). Session data from '
+            '<a href="https://docs.fastf1.dev/" target="_blank" rel="noopener">FastF1</a> '
+            'where the official timing archive is reachable, otherwise from OpenF1.'
+            '<div class="f1-side-credit">Created by <strong>Maxvy</strong></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
     # Run the page that the navigation resolved for this URL.
     pg.run()
