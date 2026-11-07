@@ -1,0 +1,2117 @@
+{
+  "cache_root": "/home/runner/work/f1lab/f1lab/f1_cache/openf1",
+  "endpoints": {
+    "drivers": {
+      "bytes": 4134485,
+      "empty": 0,
+      "errors": 0,
+      "hits": 540,
+      "requests": 273,
+      "rows": 28210
+    },
+    "laps": {
+      "bytes": 70493065,
+      "empty": 3,
+      "errors": 0,
+      "hits": 446,
+      "requests": 228,
+      "rows": 397110
+    },
+    "pit": {
+      "bytes": 2176430,
+      "empty": 219,
+      "errors": 0,
+      "hits": 302,
+      "requests": 372,
+      "rows": 32949
+    },
+    "session_result": {
+      "bytes": 941853,
+      "empty": 0,
+      "errors": 0,
+      "hits": 448,
+      "requests": 226,
+      "rows": 14023
+    },
+    "sessions": {
+      "bytes": 100880,
+      "empty": 0,
+      "errors": 0,
+      "hits": 2,
+      "requests": 4,
+      "rows": 762
+    },
+    "starting_grid": {
+      "bytes": 118500,
+      "empty": 10,
+      "errors": 0,
+      "hits": 86,
+      "requests": 53,
+      "rows": 3390
+    },
+    "stints": {
+      "bytes": 3155654,
+      "empty": 0,
+      "errors": 0,
+      "hits": 448,
+      "requests": 226,
+      "rows": 58620
+    },
+    "weather": {
+      "bytes": 6209630,
+      "empty": 0,
+      "errors": 0,
+      "hits": 448,
+      "requests": 226,
+      "rows": 78971
+    }
+  },
+  "generated_at": "2026-11-07T10:04:59+00:00",
+  "last_run": {
+    "bytes": 840608,
+    "cache_hits": 1360,
+    "errors": 0,
+    "requests": 92,
+    "started_at": "2026-11-07T10:04:50+00:00",
+    "years": [
+      2025,
+      2026
+    ]
+  },
+  "sessions": {
+    "10000": {
+      "date_end": "2025-04-04T07:00:00+00:00",
+      "date_start": "2025-04-04T06:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1256,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "10001": {
+      "date_end": "2025-04-05T03:30:00+00:00",
+      "date_start": "2025-04-05T02:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1256,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "10002": {
+      "date_end": "2025-04-05T07:00:00+00:00",
+      "date_start": "2025-04-05T06:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1256,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "10006": {
+      "date_end": "2025-04-06T07:00:00+00:00",
+      "date_start": "2025-04-06T05:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1256,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "10007": {
+      "date_end": "2025-04-11T12:30:00+00:00",
+      "date_start": "2025-04-11T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1257,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "10008": {
+      "date_end": "2025-04-11T16:00:00+00:00",
+      "date_start": "2025-04-11T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1257,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "10009": {
+      "date_end": "2025-04-12T13:30:00+00:00",
+      "date_start": "2025-04-12T12:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1257,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "10010": {
+      "date_end": "2025-04-12T17:00:00+00:00",
+      "date_start": "2025-04-12T16:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1257,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "10014": {
+      "date_end": "2025-04-13T17:00:00+00:00",
+      "date_start": "2025-04-13T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1257,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "10015": {
+      "date_end": "2025-04-18T14:30:00+00:00",
+      "date_start": "2025-04-18T13:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1258,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "10016": {
+      "date_end": "2025-04-18T18:00:00+00:00",
+      "date_start": "2025-04-18T17:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1258,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "10017": {
+      "date_end": "2025-04-19T14:30:00+00:00",
+      "date_start": "2025-04-19T13:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1258,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "10018": {
+      "date_end": "2025-04-19T18:00:00+00:00",
+      "date_start": "2025-04-19T17:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1258,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "10022": {
+      "date_end": "2025-04-20T19:00:00+00:00",
+      "date_start": "2025-04-20T17:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1258,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "10023": {
+      "date_end": "2025-05-02T17:30:00+00:00",
+      "date_start": "2025-05-02T16:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1259,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "10024": {
+      "date_end": "2025-05-02T21:14:00+00:00",
+      "date_start": "2025-05-02T20:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1259,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "10028": {
+      "date_end": "2025-05-03T16:30:00+00:00",
+      "date_start": "2025-05-03T16:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1259,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "10029": {
+      "date_end": "2025-05-03T21:00:00+00:00",
+      "date_start": "2025-05-03T20:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1259,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "10033": {
+      "date_end": "2025-05-04T22:00:00+00:00",
+      "date_start": "2025-05-04T20:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1259,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "11227": {
+      "date_end": "2026-03-06T02:30:00+00:00",
+      "date_start": "2026-03-06T01:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1279,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11228": {
+      "date_end": "2026-03-06T06:00:00+00:00",
+      "date_start": "2026-03-06T05:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1279,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11229": {
+      "date_end": "2026-03-07T02:30:00+00:00",
+      "date_start": "2026-03-07T01:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1279,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11230": {
+      "date_end": "2026-03-07T06:00:00+00:00",
+      "date_start": "2026-03-07T05:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1279,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11234": {
+      "date_end": "2026-03-08T06:00:00+00:00",
+      "date_start": "2026-03-08T04:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1279,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11235": {
+      "date_end": "2026-03-13T04:30:00+00:00",
+      "date_start": "2026-03-13T03:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1280,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11236": {
+      "date_end": "2026-03-13T08:14:00+00:00",
+      "date_start": "2026-03-13T07:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1280,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11240": {
+      "date_end": "2026-03-14T04:00:00+00:00",
+      "date_start": "2026-03-14T03:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1280,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11241": {
+      "date_end": "2026-03-14T08:00:00+00:00",
+      "date_start": "2026-03-14T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1280,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11245": {
+      "date_end": "2026-03-15T09:00:00+00:00",
+      "date_start": "2026-03-15T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1280,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11246": {
+      "date_end": "2026-03-27T03:30:00+00:00",
+      "date_start": "2026-03-27T02:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1281,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11247": {
+      "date_end": "2026-03-27T07:00:00+00:00",
+      "date_start": "2026-03-27T06:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1281,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11248": {
+      "date_end": "2026-03-28T03:30:00+00:00",
+      "date_start": "2026-03-28T02:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1281,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11249": {
+      "date_end": "2026-03-28T07:00:00+00:00",
+      "date_start": "2026-03-28T06:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1281,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11253": {
+      "date_end": "2026-03-29T07:00:00+00:00",
+      "date_start": "2026-03-29T05:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1281,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11270": {
+      "date_end": "2026-05-01T17:30:00+00:00",
+      "date_start": "2026-05-01T16:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1284,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11271": {
+      "date_end": "2026-05-01T21:14:00+00:00",
+      "date_start": "2026-05-01T20:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1284,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11275": {
+      "date_end": "2026-05-02T17:00:00+00:00",
+      "date_start": "2026-05-02T16:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1284,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11276": {
+      "date_end": "2026-05-02T21:00:00+00:00",
+      "date_start": "2026-05-02T20:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1284,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11280": {
+      "date_end": "2026-05-03T19:00:00+00:00",
+      "date_start": "2026-05-03T17:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1284,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11281": {
+      "date_end": "2026-05-22T17:30:00+00:00",
+      "date_start": "2026-05-22T16:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1285,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11282": {
+      "date_end": "2026-05-22T21:14:00+00:00",
+      "date_start": "2026-05-22T20:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1285,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11286": {
+      "date_end": "2026-05-23T17:00:00+00:00",
+      "date_start": "2026-05-23T16:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1285,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11287": {
+      "date_end": "2026-05-23T21:00:00+00:00",
+      "date_start": "2026-05-23T20:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1285,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11291": {
+      "date_end": "2026-05-24T22:00:00+00:00",
+      "date_start": "2026-05-24T20:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1285,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11292": {
+      "date_end": "2026-06-05T12:30:00+00:00",
+      "date_start": "2026-06-05T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1286,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11293": {
+      "date_end": "2026-06-05T16:00:00+00:00",
+      "date_start": "2026-06-05T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1286,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11294": {
+      "date_end": "2026-06-06T11:30:00+00:00",
+      "date_start": "2026-06-06T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1286,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11295": {
+      "date_end": "2026-06-06T15:00:00+00:00",
+      "date_start": "2026-06-06T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1286,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11299": {
+      "date_end": "2026-06-07T15:00:00+00:00",
+      "date_start": "2026-06-07T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1286,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11300": {
+      "date_end": "2026-06-12T12:30:00+00:00",
+      "date_start": "2026-06-12T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1287,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11301": {
+      "date_end": "2026-06-12T16:00:00+00:00",
+      "date_start": "2026-06-12T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1287,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11302": {
+      "date_end": "2026-06-13T11:30:00+00:00",
+      "date_start": "2026-06-13T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1287,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11303": {
+      "date_end": "2026-06-13T15:00:00+00:00",
+      "date_start": "2026-06-13T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1287,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11307": {
+      "date_end": "2026-06-14T15:00:00+00:00",
+      "date_start": "2026-06-14T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1287,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11308": {
+      "date_end": "2026-06-26T12:30:00+00:00",
+      "date_start": "2026-06-26T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1288,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11309": {
+      "date_end": "2026-06-26T16:00:00+00:00",
+      "date_start": "2026-06-26T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1288,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11310": {
+      "date_end": "2026-06-27T11:30:00+00:00",
+      "date_start": "2026-06-27T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1288,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11311": {
+      "date_end": "2026-06-27T15:00:00+00:00",
+      "date_start": "2026-06-27T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1288,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11315": {
+      "date_end": "2026-06-28T15:00:00+00:00",
+      "date_start": "2026-06-28T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1288,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11316": {
+      "date_end": "2026-07-03T12:30:00+00:00",
+      "date_start": "2026-07-03T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1289,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11317": {
+      "date_end": "2026-07-03T16:14:00+00:00",
+      "date_start": "2026-07-03T15:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1289,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11321": {
+      "date_end": "2026-07-04T12:00:00+00:00",
+      "date_start": "2026-07-04T11:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1289,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11322": {
+      "date_end": "2026-07-04T16:00:00+00:00",
+      "date_start": "2026-07-04T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1289,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11326": {
+      "date_end": "2026-07-05T16:00:00+00:00",
+      "date_start": "2026-07-05T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1289,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11327": {
+      "date_end": "2026-07-17T12:30:00+00:00",
+      "date_start": "2026-07-17T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1290,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11328": {
+      "date_end": "2026-07-17T16:00:00+00:00",
+      "date_start": "2026-07-17T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1290,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11329": {
+      "date_end": "2026-07-18T11:30:00+00:00",
+      "date_start": "2026-07-18T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1290,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11330": {
+      "date_end": "2026-07-18T15:00:00+00:00",
+      "date_start": "2026-07-18T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1290,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11334": {
+      "date_end": "2026-07-19T15:00:00+00:00",
+      "date_start": "2026-07-19T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1290,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11335": {
+      "date_end": "2026-07-24T12:30:00+00:00",
+      "date_start": "2026-07-24T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1291,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11336": {
+      "date_end": "2026-07-24T16:00:00+00:00",
+      "date_start": "2026-07-24T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1291,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11337": {
+      "date_end": "2026-07-25T11:30:00+00:00",
+      "date_start": "2026-07-25T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1291,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11338": {
+      "date_end": "2026-07-25T15:00:00+00:00",
+      "date_start": "2026-07-25T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1291,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11342": {
+      "date_end": "2026-07-26T15:00:00+00:00",
+      "date_start": "2026-07-26T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1291,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11343": {
+      "date_end": "2026-08-21T11:30:00+00:00",
+      "date_start": "2026-08-21T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1292,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11344": {
+      "date_end": "2026-08-21T15:14:00+00:00",
+      "date_start": "2026-08-21T14:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1292,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11348": {
+      "date_end": "2026-08-22T11:00:00+00:00",
+      "date_start": "2026-08-22T10:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1292,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11349": {
+      "date_end": "2026-08-22T15:00:00+00:00",
+      "date_start": "2026-08-22T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1292,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11353": {
+      "date_end": "2026-08-23T15:00:00+00:00",
+      "date_start": "2026-08-23T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1292,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11354": {
+      "date_end": "2026-09-04T11:30:00+00:00",
+      "date_start": "2026-09-04T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1293,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11355": {
+      "date_end": "2026-09-04T15:00:00+00:00",
+      "date_start": "2026-09-04T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1293,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11356": {
+      "date_end": "2026-09-05T11:30:00+00:00",
+      "date_start": "2026-09-05T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1293,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11357": {
+      "date_end": "2026-09-05T15:00:00+00:00",
+      "date_start": "2026-09-05T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1293,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11361": {
+      "date_end": "2026-09-06T15:00:00+00:00",
+      "date_start": "2026-09-06T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1293,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11362": {
+      "date_end": "2026-09-11T12:30:00+00:00",
+      "date_start": "2026-09-11T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1294,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11363": {
+      "date_end": "2026-09-11T16:00:00+00:00",
+      "date_start": "2026-09-11T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1294,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11364": {
+      "date_end": "2026-09-12T11:30:00+00:00",
+      "date_start": "2026-09-12T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1294,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11365": {
+      "date_end": "2026-09-12T15:00:00+00:00",
+      "date_start": "2026-09-12T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1294,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11369": {
+      "date_end": "2026-09-13T15:00:00+00:00",
+      "date_start": "2026-09-13T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1294,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11370": {
+      "date_end": "2026-09-24T09:30:00+00:00",
+      "date_start": "2026-09-24T08:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1295,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11371": {
+      "date_end": "2026-09-24T13:00:00+00:00",
+      "date_start": "2026-09-24T12:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1295,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11372": {
+      "date_end": "2026-09-25T09:30:00+00:00",
+      "date_start": "2026-09-25T08:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1295,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11373": {
+      "date_end": "2026-09-25T13:00:00+00:00",
+      "date_start": "2026-09-25T12:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1295,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11377": {
+      "date_end": "2026-09-26T13:00:00+00:00",
+      "date_start": "2026-09-26T11:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1295,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11378": {
+      "date_end": "2026-10-09T09:30:00+00:00",
+      "date_start": "2026-10-09T08:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1296,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11379": {
+      "date_end": "2026-10-09T13:14:00+00:00",
+      "date_start": "2026-10-09T12:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1296,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11383": {
+      "date_end": "2026-10-10T09:30:00+00:00",
+      "date_start": "2026-10-10T09:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1296,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11384": {
+      "date_end": "2026-10-10T14:00:00+00:00",
+      "date_start": "2026-10-10T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1296,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11388": {
+      "date_end": "2026-10-11T14:00:00+00:00",
+      "date_start": "2026-10-11T12:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1296,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11389": {
+      "date_end": "2026-10-23T18:30:00+00:00",
+      "date_start": "2026-10-23T17:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1297,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11390": {
+      "date_end": "2026-10-23T22:00:00+00:00",
+      "date_start": "2026-10-23T21:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1297,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11391": {
+      "date_end": "2026-10-24T18:30:00+00:00",
+      "date_start": "2026-10-24T17:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1297,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11392": {
+      "date_end": "2026-10-24T22:00:00+00:00",
+      "date_start": "2026-10-24T21:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1297,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11396": {
+      "date_end": "2026-10-25T22:00:00+00:00",
+      "date_start": "2026-10-25T20:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1297,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11397": {
+      "date_end": "2026-10-30T19:30:00+00:00",
+      "date_start": "2026-10-30T18:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1298,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11398": {
+      "date_end": "2026-10-30T23:00:00+00:00",
+      "date_start": "2026-10-30T22:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1298,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11399": {
+      "date_end": "2026-10-31T18:30:00+00:00",
+      "date_start": "2026-10-31T17:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1298,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11400": {
+      "date_end": "2026-10-31T22:00:00+00:00",
+      "date_start": "2026-10-31T21:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1298,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11404": {
+      "date_end": "2026-11-01T22:00:00+00:00",
+      "date_start": "2026-11-01T20:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1298,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "11405": {
+      "date_end": "2026-11-06T16:30:00+00:00",
+      "date_start": "2026-11-06T15:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1299,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11406": {
+      "date_end": "2026-11-06T20:00:00+00:00",
+      "date_start": "2026-11-06T19:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1299,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11465": {
+      "date_end": "2026-02-11T16:00:00+00:00",
+      "date_start": "2026-02-11T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1304,
+      "session_name": "Day 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11466": {
+      "date_end": "2026-02-12T16:00:00+00:00",
+      "date_start": "2026-02-12T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1304,
+      "session_name": "Day 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11467": {
+      "date_end": "2026-02-13T16:00:00+00:00",
+      "date_start": "2026-02-13T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1304,
+      "session_name": "Day 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11468": {
+      "date_end": "2026-02-20T16:00:00+00:00",
+      "date_start": "2026-02-20T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1305,
+      "session_name": "Day 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11469": {
+      "date_end": "2026-02-19T16:00:00+00:00",
+      "date_start": "2026-02-19T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1305,
+      "session_name": "Day 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11470": {
+      "date_end": "2026-02-18T16:00:00+00:00",
+      "date_start": "2026-02-18T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1305,
+      "session_name": "Day 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11727": {
+      "date_end": "2026-10-02T05:30:00+00:00",
+      "date_start": "2026-10-02T04:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1308,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11728": {
+      "date_end": "2026-10-02T09:00:00+00:00",
+      "date_start": "2026-10-02T08:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1308,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11729": {
+      "date_end": "2026-10-03T05:30:00+00:00",
+      "date_start": "2026-10-03T04:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1308,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2026
+    },
+    "11730": {
+      "date_end": "2026-10-03T09:00:00+00:00",
+      "date_start": "2026-10-03T08:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1308,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2026
+    },
+    "11731": {
+      "date_end": "2026-10-04T09:00:00+00:00",
+      "date_start": "2026-10-04T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1308,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2026
+    },
+    "9683": {
+      "date_end": "2025-02-26T16:00:00+00:00",
+      "date_start": "2025-02-26T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1253,
+      "session_name": "Day 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9684": {
+      "date_end": "2025-02-27T16:00:00+00:00",
+      "date_start": "2025-02-27T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1253,
+      "session_name": "Day 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9685": {
+      "date_end": "2025-02-28T16:00:00+00:00",
+      "date_start": "2025-02-28T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1253,
+      "session_name": "Day 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9686": {
+      "date_end": "2025-03-14T02:30:00+00:00",
+      "date_start": "2025-03-14T01:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1254,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9687": {
+      "date_end": "2025-03-14T06:00:00+00:00",
+      "date_start": "2025-03-14T05:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1254,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9688": {
+      "date_end": "2025-03-15T02:30:00+00:00",
+      "date_start": "2025-03-15T01:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1254,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9689": {
+      "date_end": "2025-03-15T06:00:00+00:00",
+      "date_start": "2025-03-15T05:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1254,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9693": {
+      "date_end": "2025-03-16T06:00:00+00:00",
+      "date_start": "2025-03-16T04:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1254,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9832": {
+      "date_end": "2025-12-05T10:30:00+00:00",
+      "date_start": "2025-12-05T09:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1276,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9833": {
+      "date_end": "2025-12-05T14:00:00+00:00",
+      "date_start": "2025-12-05T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1276,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9834": {
+      "date_end": "2025-12-06T11:30:00+00:00",
+      "date_start": "2025-12-06T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1276,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9835": {
+      "date_end": "2025-12-06T15:00:00+00:00",
+      "date_start": "2025-12-06T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1276,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9839": {
+      "date_end": "2025-12-07T15:00:00+00:00",
+      "date_start": "2025-12-07T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1276,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9840": {
+      "date_end": "2025-11-28T14:30:00+00:00",
+      "date_start": "2025-11-28T13:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1275,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9841": {
+      "date_end": "2025-11-28T18:14:00+00:00",
+      "date_start": "2025-11-28T17:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1275,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9845": {
+      "date_end": "2025-11-29T15:00:00+00:00",
+      "date_start": "2025-11-29T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1275,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9846": {
+      "date_end": "2025-11-29T19:00:00+00:00",
+      "date_start": "2025-11-29T18:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1275,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9850": {
+      "date_end": "2025-11-30T18:00:00+00:00",
+      "date_start": "2025-11-30T16:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1275,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9851": {
+      "date_end": "2025-11-21T01:30:00+00:00",
+      "date_start": "2025-11-21T00:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1274,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9852": {
+      "date_end": "2025-11-21T05:00:00+00:00",
+      "date_start": "2025-11-21T04:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1274,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9853": {
+      "date_end": "2025-11-22T01:30:00+00:00",
+      "date_start": "2025-11-22T00:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1274,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9854": {
+      "date_end": "2025-11-22T05:00:00+00:00",
+      "date_start": "2025-11-22T04:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1274,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9858": {
+      "date_end": "2025-11-23T06:00:00+00:00",
+      "date_start": "2025-11-23T04:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1274,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9859": {
+      "date_end": "2025-11-07T15:30:00+00:00",
+      "date_start": "2025-11-07T14:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1273,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9860": {
+      "date_end": "2025-11-07T19:14:00+00:00",
+      "date_start": "2025-11-07T18:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1273,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9864": {
+      "date_end": "2025-11-08T15:00:00+00:00",
+      "date_start": "2025-11-08T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1273,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9865": {
+      "date_end": "2025-11-08T19:00:00+00:00",
+      "date_start": "2025-11-08T18:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1273,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9869": {
+      "date_end": "2025-11-09T19:00:00+00:00",
+      "date_start": "2025-11-09T17:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1273,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9870": {
+      "date_end": "2025-10-24T19:30:00+00:00",
+      "date_start": "2025-10-24T18:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1272,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9871": {
+      "date_end": "2025-10-24T23:00:00+00:00",
+      "date_start": "2025-10-24T22:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1272,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9872": {
+      "date_end": "2025-10-25T18:30:00+00:00",
+      "date_start": "2025-10-25T17:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1272,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9873": {
+      "date_end": "2025-10-25T22:00:00+00:00",
+      "date_start": "2025-10-25T21:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1272,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9877": {
+      "date_end": "2025-10-26T22:00:00+00:00",
+      "date_start": "2025-10-26T20:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1272,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9878": {
+      "date_end": "2025-10-17T18:30:00+00:00",
+      "date_start": "2025-10-17T17:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1271,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9879": {
+      "date_end": "2025-10-17T22:14:00+00:00",
+      "date_start": "2025-10-17T21:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1271,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9883": {
+      "date_end": "2025-10-18T17:30:00+00:00",
+      "date_start": "2025-10-18T17:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1271,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9884": {
+      "date_end": "2025-10-18T22:00:00+00:00",
+      "date_start": "2025-10-18T21:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1271,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9888": {
+      "date_end": "2025-10-19T21:00:00+00:00",
+      "date_start": "2025-10-19T19:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1271,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9889": {
+      "date_end": "2025-10-03T10:30:00+00:00",
+      "date_start": "2025-10-03T09:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1270,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9890": {
+      "date_end": "2025-10-03T14:00:00+00:00",
+      "date_start": "2025-10-03T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1270,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9891": {
+      "date_end": "2025-10-04T10:30:00+00:00",
+      "date_start": "2025-10-04T09:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1270,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9892": {
+      "date_end": "2025-10-04T14:00:00+00:00",
+      "date_start": "2025-10-04T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1270,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9896": {
+      "date_end": "2025-10-05T14:00:00+00:00",
+      "date_start": "2025-10-05T12:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1270,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9897": {
+      "date_end": "2025-09-19T09:30:00+00:00",
+      "date_start": "2025-09-19T08:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1269,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9898": {
+      "date_end": "2025-09-19T13:00:00+00:00",
+      "date_start": "2025-09-19T12:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1269,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9899": {
+      "date_end": "2025-09-20T09:30:00+00:00",
+      "date_start": "2025-09-20T08:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1269,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9900": {
+      "date_end": "2025-09-20T13:00:00+00:00",
+      "date_start": "2025-09-20T12:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1269,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9904": {
+      "date_end": "2025-09-21T13:00:00+00:00",
+      "date_start": "2025-09-21T11:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1269,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9905": {
+      "date_end": "2025-09-05T12:30:00+00:00",
+      "date_start": "2025-09-05T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1268,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9906": {
+      "date_end": "2025-09-05T16:00:00+00:00",
+      "date_start": "2025-09-05T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1268,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9907": {
+      "date_end": "2025-09-06T11:30:00+00:00",
+      "date_start": "2025-09-06T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1268,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9908": {
+      "date_end": "2025-09-06T15:00:00+00:00",
+      "date_start": "2025-09-06T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1268,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9912": {
+      "date_end": "2025-09-07T15:00:00+00:00",
+      "date_start": "2025-09-07T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1268,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9913": {
+      "date_end": "2025-08-29T11:30:00+00:00",
+      "date_start": "2025-08-29T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1267,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9914": {
+      "date_end": "2025-08-29T15:00:00+00:00",
+      "date_start": "2025-08-29T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1267,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9915": {
+      "date_end": "2025-08-30T10:30:00+00:00",
+      "date_start": "2025-08-30T09:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1267,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9916": {
+      "date_end": "2025-08-30T14:00:00+00:00",
+      "date_start": "2025-08-30T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1267,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9920": {
+      "date_end": "2025-08-31T15:00:00+00:00",
+      "date_start": "2025-08-31T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1267,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9921": {
+      "date_end": "2025-08-01T12:30:00+00:00",
+      "date_start": "2025-08-01T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1266,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9922": {
+      "date_end": "2025-08-01T16:00:00+00:00",
+      "date_start": "2025-08-01T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1266,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9923": {
+      "date_end": "2025-08-02T11:30:00+00:00",
+      "date_start": "2025-08-02T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1266,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9924": {
+      "date_end": "2025-08-02T15:00:00+00:00",
+      "date_start": "2025-08-02T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1266,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9928": {
+      "date_end": "2025-08-03T15:00:00+00:00",
+      "date_start": "2025-08-03T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1266,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9929": {
+      "date_end": "2025-07-25T11:30:00+00:00",
+      "date_start": "2025-07-25T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1265,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9930": {
+      "date_end": "2025-07-25T15:14:00+00:00",
+      "date_start": "2025-07-25T14:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1265,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9934": {
+      "date_end": "2025-07-26T10:30:00+00:00",
+      "date_start": "2025-07-26T10:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1265,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9935": {
+      "date_end": "2025-07-26T15:00:00+00:00",
+      "date_start": "2025-07-26T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1265,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9939": {
+      "date_end": "2025-07-27T15:00:00+00:00",
+      "date_start": "2025-07-27T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1265,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9940": {
+      "date_end": "2025-07-04T12:30:00+00:00",
+      "date_start": "2025-07-04T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1277,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9941": {
+      "date_end": "2025-07-04T16:00:00+00:00",
+      "date_start": "2025-07-04T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1277,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9942": {
+      "date_end": "2025-07-05T11:30:00+00:00",
+      "date_start": "2025-07-05T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1277,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9943": {
+      "date_end": "2025-07-05T15:00:00+00:00",
+      "date_start": "2025-07-05T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1277,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9947": {
+      "date_end": "2025-07-06T16:00:00+00:00",
+      "date_start": "2025-07-06T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1277,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9948": {
+      "date_end": "2025-06-27T12:30:00+00:00",
+      "date_start": "2025-06-27T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1264,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9949": {
+      "date_end": "2025-06-27T16:00:00+00:00",
+      "date_start": "2025-06-27T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1264,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9950": {
+      "date_end": "2025-06-28T11:30:00+00:00",
+      "date_start": "2025-06-28T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1264,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9951": {
+      "date_end": "2025-06-28T15:00:00+00:00",
+      "date_start": "2025-06-28T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1264,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9955": {
+      "date_end": "2025-06-29T15:00:00+00:00",
+      "date_start": "2025-06-29T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1264,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9956": {
+      "date_end": "2025-06-13T18:30:00+00:00",
+      "date_start": "2025-06-13T17:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1263,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9957": {
+      "date_end": "2025-06-13T22:00:00+00:00",
+      "date_start": "2025-06-13T21:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1263,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9958": {
+      "date_end": "2025-06-14T17:30:00+00:00",
+      "date_start": "2025-06-14T16:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1263,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9959": {
+      "date_end": "2025-06-14T21:00:00+00:00",
+      "date_start": "2025-06-14T20:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1263,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9963": {
+      "date_end": "2025-06-15T20:00:00+00:00",
+      "date_start": "2025-06-15T18:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1263,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9964": {
+      "date_end": "2025-05-30T12:30:00+00:00",
+      "date_start": "2025-05-30T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1262,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9965": {
+      "date_end": "2025-05-30T16:00:00+00:00",
+      "date_start": "2025-05-30T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1262,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9966": {
+      "date_end": "2025-05-31T11:30:00+00:00",
+      "date_start": "2025-05-31T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1262,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9967": {
+      "date_end": "2025-05-31T15:00:00+00:00",
+      "date_start": "2025-05-31T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1262,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9971": {
+      "date_end": "2025-06-01T15:00:00+00:00",
+      "date_start": "2025-06-01T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1262,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9972": {
+      "date_end": "2025-05-23T12:30:00+00:00",
+      "date_start": "2025-05-23T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1261,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9973": {
+      "date_end": "2025-05-23T16:00:00+00:00",
+      "date_start": "2025-05-23T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1261,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9974": {
+      "date_end": "2025-05-24T11:30:00+00:00",
+      "date_start": "2025-05-24T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1261,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9975": {
+      "date_end": "2025-05-24T15:00:00+00:00",
+      "date_start": "2025-05-24T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1261,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9979": {
+      "date_end": "2025-05-25T15:00:00+00:00",
+      "date_start": "2025-05-25T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1261,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9980": {
+      "date_end": "2025-05-16T12:30:00+00:00",
+      "date_start": "2025-05-16T11:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1260,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9981": {
+      "date_end": "2025-05-16T16:00:00+00:00",
+      "date_start": "2025-05-16T15:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1260,
+      "session_name": "Practice 2",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9982": {
+      "date_end": "2025-05-17T11:30:00+00:00",
+      "date_start": "2025-05-17T10:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1260,
+      "session_name": "Practice 3",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9983": {
+      "date_end": "2025-05-17T15:00:00+00:00",
+      "date_start": "2025-05-17T14:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1260,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9987": {
+      "date_end": "2025-05-18T15:00:00+00:00",
+      "date_start": "2025-05-18T13:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1260,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9988": {
+      "date_end": "2025-03-21T04:30:00+00:00",
+      "date_start": "2025-03-21T03:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1255,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    },
+    "9989": {
+      "date_end": "2025-03-21T08:14:00+00:00",
+      "date_start": "2025-03-21T07:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1255,
+      "session_name": "Sprint Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9993": {
+      "date_end": "2025-03-22T04:00:00+00:00",
+      "date_start": "2025-03-22T03:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1255,
+      "session_name": "Sprint",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9994": {
+      "date_end": "2025-03-22T08:00:00+00:00",
+      "date_start": "2025-03-22T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1255,
+      "session_name": "Qualifying",
+      "session_type": "Qualifying",
+      "year": 2025
+    },
+    "9998": {
+      "date_end": "2025-03-23T09:00:00+00:00",
+      "date_start": "2025-03-23T07:00:00+00:00",
+      "finished": true,
+      "meeting_key": 1255,
+      "session_name": "Race",
+      "session_type": "Race",
+      "year": 2025
+    },
+    "9999": {
+      "date_end": "2025-04-04T03:30:00+00:00",
+      "date_start": "2025-04-04T02:30:00+00:00",
+      "finished": true,
+      "meeting_key": 1256,
+      "session_name": "Practice 1",
+      "session_type": "Practice",
+      "year": 2025
+    }
+  }
+}
