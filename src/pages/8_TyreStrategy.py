@@ -24,8 +24,7 @@ import plotly.graph_objects as go
 from shared import load_fastf1_session, setup_fastf1_cache, show_plotly_chart
 from config import FASTF1_CONFIG, MODEL_CONFIG, STREAMLIT_CONFIG
 from styles import (
-    chart_height, fig_layout as _fig_layout, LABEL_FONT, TEXT_SECONDARY,
-    scaled_height, COMPOUND_COLORS,
+    chart_height, fig_layout as _fig_layout, LABEL_FONT, scaled_height, COMPOUND_COLORS,
 )
 from fastf1_extended import get_tyre_stints, get_pit_stops, ordered_drivers
 from pace import clean_laps_for_analysis
@@ -332,7 +331,7 @@ def _tab_strategy(context, year):
             ))
             fig_pace.update_yaxes(showgrid=False)
             show_plotly_chart(fig_pace)
-            caption(f"Samples: " + " · ".join(
+            caption("Samples: " + " · ".join(
                 f"{r['Compound']} n={int(r['Laps'])} ({int(r['Drivers'])} drivers)"
                 for _, r in pace.iterrows())
                 + ". The fastest average is not proof the compound itself "

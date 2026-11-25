@@ -198,16 +198,20 @@ def calculate_teammate_comparison(df: pd.DataFrame) -> pd.DataFrame:
                         # Only compare if both finished (or use raw position if that's the standard)
                         # Standard H2H usually counts classification.
                         if pd.notna(pos1) and pd.notna(pos2):
-                            if pos1 < pos2: d1_race_wins += 1
-                            elif pos2 < pos1: d2_race_wins += 1
-                            
+                            if pos1 < pos2:
+                                d1_race_wins += 1
+                            elif pos2 < pos1:
+                                d2_race_wins += 1
+
                         # Quali H2H (Approximation using Starting Grid)
                         grid1 = d1_races[d1_races['Track'] == track]['Starting Grid'].iloc[0]
                         grid2 = d2_races[d2_races['Track'] == track]['Starting Grid'].iloc[0]
-                        
+
                         if pd.notna(grid1) and pd.notna(grid2):
-                            if grid1 < grid2: d1_quali_wins += 1
-                            elif grid2 < grid1: d2_quali_wins += 1
+                            if grid1 < grid2:
+                                d1_quali_wins += 1
+                            elif grid2 < grid1:
+                                d2_quali_wins += 1
                     
                     comparisons.append({
                         'Team': team,

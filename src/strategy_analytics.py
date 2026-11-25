@@ -33,10 +33,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-import numpy as np
 import pandas as pd
 
-from pace import ESTIMATED, MIN_LAPS_FOR_FIT, clean_laps_for_analysis, data_quality  # noqa: E402
+from pace import ESTIMATED, clean_laps_for_analysis, data_quality  # noqa: E402
 
 # Compounds the app knows how to colour; anything else is reported as
 # UNKNOWN rather than guessed.

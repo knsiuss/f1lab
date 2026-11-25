@@ -1629,8 +1629,6 @@ def _section_insights(ordered, selected_race, stints, extras):
     winner_row = ordered.iloc[0]
     winner = str(winner_row.get('Driver', ''))
     winner_grid = _int_or_none(winner_row.get('Starting Grid'))
-    gap2 = _number_or_none(winner_row.get('GapToLeader')) \
-        if 'GapToLeader' in winner_row else None
 
     moment = (f"{winner} took victory from {_ordinal(winner_grid)} on the grid"
               if winner_grid else f"{winner} took the victory")
